@@ -1,0 +1,10 @@
+[tool.ruff]
+line-length = 88  # Match Black's line length
+fix = true        # Autofix issues when possible
+
+[tool.isort]
+profile = "black"
+
+[[tool.mypy.overrides]]
+module = ["IPython.*"]
+ignore_missing_imports = true
