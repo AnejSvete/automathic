@@ -7,6 +7,7 @@ from formula import (
     Negation,
     Predicate,
     Relation,
+    SymbolPredicate,
     UniversalQuantifier,
 )
 
@@ -108,7 +109,10 @@ class FOParser:
             var = self.consume()
             if self.peek() == ")":
                 self.consume()  # Consume ")"
-            return Predicate(token, var)
+            if token[:1] == "Q":
+                return SymbolPredicate(token[:1], var, token[1:])
+            else:
+                return Predicate(token, var)
         else:
             # This might be a variable in a relation
             if self.peek() in {"<", "<=", ">", ">=", "="}:
