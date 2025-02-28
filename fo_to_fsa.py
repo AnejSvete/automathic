@@ -81,11 +81,11 @@ class FOtoFSA:
         formula_fsa = self._convert(formula, V, V_alphabet)
 
         # Intersect the structure FSA with the formula FSA
-        # fsa = V_structure_fsa.intersect(formula_fsa)
+        fsa = V_structure_fsa.intersect(formula_fsa)
 
         # Always trim and minimize the resulting automaton
-        # fsa = fsa.trim().minimize()
-        fsa = formula_fsa.trim().minimize()
+        fsa = fsa.trim().minimize()
+        # fsa = formula_fsa.trim().minimize()
 
         if formula.is_sentence():
             return self._project(fsa)
@@ -100,6 +100,12 @@ class FOtoFSA:
         """
         # Create a new FSA with the same alphabet but no variables
         proj_fsa = FiniteStateAutomaton(fsa.num_states, self.alphabet)
+
+        # Set up states with same origins
+        for i, state in enumerate(fsa.states):
+            if state is not None:
+                # Maintain the origin information
+                proj_fsa.states[i] = State(i, origin=state.origin)
 
         # Set initial state
         if fsa.initial_state is not None:
@@ -117,7 +123,7 @@ class FOtoFSA:
         for state in fsa.accepting_states:
             proj_fsa.set_accepting_state(state.id)
 
-        return proj_fsa.trim().minimize()
+        return proj_fsa.trim()  # Not minimizing to preserve state structure
 
     def _construct_V_structure_fsa(self, V, V_alphabet):
         """Constructs the FSA that checks if a string is a valid V-structure.
@@ -322,106 +328,331 @@ class FOtoFSA:
 
     def _remove_variable(self, fsa, V, variable):
         """
-        Implement projection to handle existential quantification following Straubing's approach.
-
-        In this approach, we don't use epsilon transitions, but instead create a modified FSA
-        that accepts the projection of the language recognized by the input FSA.
-
-        Args:
-            fsa: The automaton to project
-            V: List of variables
-            variable: The variable to project out
-
-        Returns:
-            A new FSA that recognizes the projection
+        Remove variable by creating an NFSA with 'seen' and 'unseen' states
+        that allows non-deterministic transitions. The NFSA will be determinized
+        later in the process.
         """
+        from itertools import product
+
+        from nfa import NonDeterministicFSA
+
+        print(f"DEBUG: Starting _remove_variable with variable={variable}")
+        print(
+            f"DEBUG: Original FSA has {fsa.num_states} states and {len(fsa.transitions)} transitions"
+        )
+        print(f"DEBUG: Original alphabet size: {len(fsa.alphabet)}")
+
+        # Print all original transitions for reference
+        print("\nORIGINAL TRANSITIONS:")
+        for (src, symbol), dst in fsa.transitions.items():
+            print(f"  {src.label} --{symbol}--> {dst.label}")
+
         # Create new alphabet without the projected variable
         V_new = sorted(set(V) - {variable})
         alphabet_new = list(product(self.alphabet, self._powerset(V_new)))
 
-        # Create a new FSA for the result with the new alphabet
-        # Each state in the new FSA will track:
-        # 1. A state from the original FSA
-        # 2. A bit indicating whether the variable has been seen (0=no, 1=yes)
-        result = FiniteStateAutomaton(fsa.num_states * 2, alphabet_new)
+        print(f"\nDEBUG: New alphabet without {variable}: size={len(alphabet_new)}")
+        print(f"DEBUG: Sample of new alphabet: {alphabet_new[:3]}...")
 
-        # Create a mapping from (original_state, seen_bit) to new state
-        p2idx = {p: i for i, p in enumerate(product(range(fsa.num_states), [0, 1]))}
+        # Create mapping from pairs (original_state, seen_bit) to new state IDs
+        p2idx = {}  # (state_id, seen_bit) -> new_state_id
+        idx = 0
 
-        print(f"Mapping: {p2idx}")
+        for state_id in range(fsa.num_states):
+            if fsa.states[state_id] is not None:
+                # Each state gets two copies - one for 'seen=0' and one for 'seen=1'
+                p2idx[(state_id, 0)] = idx
+                idx += 1
+                p2idx[(state_id, 1)] = idx
+                idx += 1
 
-        # Set initial state - we start with the original initial state and variable not seen
+        print(f"\nDEBUG: Created mapping with {len(p2idx)} state pairs")
+        print(f"DEBUG: Mapping sample: {list(p2idx.items())[:3]}...")
+
+        # Create a new NFSA with double the number of states
+        result = NonDeterministicFSA(idx, alphabet_new)
+
+        # Copy state origins and set labels
+        for (orig_id, seen_bit), new_id in p2idx.items():
+            if fsa.states[orig_id] is not None:
+                origin = fsa.states[orig_id].origin
+                # Add 'seen' indicator to state label
+                label = (
+                    f"{fsa.states[orig_id].label}, seen={seen_bit}"
+                    if fsa.states[orig_id].label
+                    else None
+                )
+                result.states[new_id] = State(new_id, origin=origin, label=label)
+
+        # Set initial state - the 'unseen' version of the original initial state
         if fsa.initial_state is not None:
-            result.set_initial_state(p2idx[(fsa.initial_state.id, 0)])
-            print(f"Initial state: {fsa.initial_state.id} with variable not seen")
+            initial_id = p2idx[(fsa.initial_state.id, 0)]
+            result.set_initial_state(initial_id)
+            print(f"DEBUG: Set initial state to {initial_id}")
+        else:
+            print("DEBUG: Original FSA has no initial state!")
 
-        # Process transitions from the original FSA
+        # Process transitions
+        transition_count = 0
+        added_transitions = []  # Track transitions that were added
+        skipped_transitions = []  # Track transitions that were skipped
+        attempted_transitions = []  # Track all transitions we attempt to add
+
+        print("\nPROCESSING TRANSITIONS:")
         for (src_state, old_symbol), dst_state in fsa.transitions.items():
             symbol, vars_at_pos = old_symbol
-
-            print()
-            print(f"Transition: {src_state.id} -> {dst_state.id} with {old_symbol}")
-            print()
+            print(
+                f"\nProcessing: {src_state.label} --({symbol},{vars_at_pos})--> {dst_state.label}"
+            )
 
             # Create new symbol without the projected variable
             new_vars = tuple(sorted([v for v in vars_at_pos if v != variable]))
             new_symbol = (symbol, new_vars)
+            print(f"  New symbol: {new_symbol}")
 
-            if variable in vars_at_pos:
-                # This is a position where the variable occurs
-                # Add transition that "records" seeing the variable
-                result.set_transition(
-                    p2idx[(src_state.id, 0)],  # From state where variable not seen
-                    new_symbol,  # New symbol (without the variable)
-                    p2idx[(dst_state.id, 1)],  # To state where variable is seen
-                )
+            # Check if the variable is present in this transition
+            var_present = variable in vars_at_pos
+            print(
+                f"  Variable {variable} is {'present' if var_present else 'NOT present'} in this transition"
+            )
 
-                print(
-                    f"Transition: {src_state.id} -> {dst_state.id} with {new_symbol} seen"
-                )
+            # Get state IDs for both 'seen=0' and 'seen=1' versions
+            unseen_src_id = p2idx[(src_state.id, 0)]
+            seen_src_id = p2idx[(src_state.id, 1)]
 
-                # !This seems to be in conflict with Straubing's construction,
-                # !but it seems necessary
-                # Also maintain existing transitions when variable was already seen
-                result.set_transition(
-                    p2idx[
-                        (src_state.id, 1)
-                    ],  # From state where variable was already seen
-                    new_symbol,  # New symbol
-                    p2idx[(dst_state.id, 1)],  # To state where variable is still seen
-                )
-
-                print(
-                    f"Transition: {src_state.id} -> {dst_state.id} with {new_symbol} already seen"
-                )
+            # The destination depends on whether the variable is present
+            if var_present:
+                # If the variable is present, the destination should be 'seen=1'
+                unseen_dst_id = p2idx[(dst_state.id, 1)]  # unseen -> seen
+                seen_dst_id = p2idx[(dst_state.id, 1)]  # seen -> seen
             else:
-                # This is a position where the variable doesn't occur
-                # Just copy the transitions, preserving the "seen" bit
-                for u in range(2):
-                    result.set_transition(
-                        p2idx[(src_state.id, u)],  # From state where variable not seen
-                        new_symbol,  # New symbol
-                        p2idx[
-                            (dst_state.id, u)
-                        ],  # To state where variable still not seen
-                    )
+                # If the variable is not present, keep the 'seen' bit unchanged
+                unseen_dst_id = p2idx[(dst_state.id, 0)]  # unseen -> unseen
+                seen_dst_id = p2idx[(dst_state.id, 1)]  # seen -> seen
 
-                    print(
-                        f"Transition: {(src_state.id, u)}[{p2idx[(src_state.id, u)]}] -> {(dst_state.id, u)}[{p2idx[(dst_state.id, u)]}] with {new_symbol} not seen"
-                    )
+            # Track what we're trying to add
+            attempted_transitions.append(
+                (unseen_src_id, new_symbol, unseen_dst_id, "unseen->unseen/seen")
+            )
+            attempted_transitions.append(
+                (seen_src_id, new_symbol, seen_dst_id, "seen->seen")
+            )
+
+            try:
+                # For the unseen bit (0)
+                print(
+                    f"  Adding: {unseen_src_id} --{new_symbol}--> {unseen_dst_id} (unseen->{('seen' if var_present else 'unseen')})"
+                )
+                print(
+                    f"  Adding: {result.states[unseen_src_id].label} --{new_symbol}--> {result.states[unseen_dst_id].label} (unseen->{('seen' if var_present else 'unseen')})"
+                )
+                result.set_transition(
+                    unseen_src_id,  # From state with seen=0
+                    new_symbol,  # New symbol
+                    unseen_dst_id,  # To state with seen=0 or seen=1
+                )
+                transition_count += 1
+                added_transitions.append(
+                    (unseen_src_id, new_symbol, unseen_dst_id, "unseen->unseen/seen")
+                )
+
+                # For the seen bit (1)
+                print(
+                    f"  Adding: {seen_src_id} --{new_symbol}--> {seen_dst_id} (seen->seen)"
+                )
+                print(
+                    f"  Adding: {result.states[seen_src_id].label} --{new_symbol}--> {result.states[seen_dst_id].label} (seen->seen)"
+                )
+                result.set_transition(
+                    seen_src_id,  # From state with seen=1
+                    new_symbol,  # New symbol
+                    seen_dst_id,  # To state with seen=1
+                )
+                transition_count += 1
+                added_transitions.append(
+                    (seen_src_id, new_symbol, seen_dst_id, "seen->seen")
+                )
+
+                # Add non-deterministic transitions
+                if var_present:
+                    # When variable is present, also add non-deterministic transition to allow
+                    # other possible destinations for the same source and symbol
+                    for (other_src, other_symbol), other_dst in fsa.transitions.items():
+                        if other_src.id == src_state.id and other_symbol[0] == symbol:
+                            # Skip the exact same transition
+                            if (
+                                other_dst.id == dst_state.id
+                                and other_symbol[1] == vars_at_pos
+                            ):
+                                continue
+
+                            # Create the new symbol without the variable
+                            other_new_vars = tuple(
+                                sorted([v for v in other_symbol[1] if v != variable])
+                            )
+                            other_new_symbol = (other_symbol[0], other_new_vars)
+
+                            # If this is the same symbol we're currently processing
+                            if other_new_symbol == new_symbol:
+                                # Determine if this other transition involves the variable
+                                other_var_present = variable in other_symbol[1]
+
+                                # Determine destination state ID
+                                if other_var_present:
+                                    other_unseen_dst_id = p2idx[
+                                        (other_dst.id, 1)
+                                    ]  # unseen -> seen
+                                    other_seen_dst_id = p2idx[
+                                        (other_dst.id, 1)
+                                    ]  # seen -> seen
+                                else:
+                                    other_unseen_dst_id = p2idx[
+                                        (other_dst.id, 0)
+                                    ]  # unseen -> unseen
+                                    other_seen_dst_id = p2idx[
+                                        (other_dst.id, 1)
+                                    ]  # seen -> seen
+
+                                # Add non-deterministic transitions
+                                print(
+                                    f"  Adding non-deterministic: {unseen_src_id} --{new_symbol}--> {other_unseen_dst_id}"
+                                )
+                                result.set_transition(
+                                    unseen_src_id, new_symbol, other_unseen_dst_id
+                                )
+                                transition_count += 1
+                                added_transitions.append(
+                                    (
+                                        unseen_src_id,
+                                        new_symbol,
+                                        other_unseen_dst_id,
+                                        "non-deterministic",
+                                    )
+                                )
+
+                                print(
+                                    f"  Adding non-deterministic: {seen_src_id} --{new_symbol}--> {other_seen_dst_id}"
+                                )
+                                result.set_transition(
+                                    seen_src_id, new_symbol, other_seen_dst_id
+                                )
+                                transition_count += 1
+                                added_transitions.append(
+                                    (
+                                        seen_src_id,
+                                        new_symbol,
+                                        other_seen_dst_id,
+                                        "non-deterministic",
+                                    )
+                                )
+
+            except Exception as e:
+                print(f"  ERROR setting transitions: {e}")
+                skipped_transitions.append(
+                    ((src_state.id, old_symbol, dst_state.id), str(e))
+                )
+
+        print(f"\nDEBUG: Added {transition_count} transitions to result FSA")
 
         # Set accepting states - a state is accepting if it corresponds to an accepting
         # state in the original FSA and the variable has been seen
+        accepting_count = 0
+        print("\nSETTING ACCEPTING STATES:")
         for state in fsa.accepting_states:
-            result.set_accepting_state(p2idx[(state.id, 1)])
-            print(f"Accepting state: {state.id} with variable seen")
+            try:
+                accept_id = p2idx[(state.id, 1)]
+                print(
+                    f"  Setting accepting state: {accept_id} (from original {state.id})"
+                )
+                result.set_accepting_state(accept_id)
+                accepting_count += 1
+            except Exception as e:
+                print(f"  ERROR setting accepting state: {e}")
+                print(f"  Failed for state={state.id}")
 
-        print()
-        print()
-        print()
+        print(f"\nDEBUG: Set {accepting_count} accepting states")
+
+        # Summary before trimming
+        print("\n===== TRANSITION SUMMARY =====")
+        print(f"Attempted: {len(attempted_transitions)} transitions")
+        print(f"Added: {len(added_transitions)} transitions")
+        print(f"Skipped: {len(skipped_transitions)} transitions")
+
+        # Check for transitions in attempted but not in added
+        missed_transitions = [
+            t
+            for t in attempted_transitions
+            if (t[0], t[1], t[2]) not in [(a[0], a[1], a[2]) for a in added_transitions]
+        ]
+        if missed_transitions:
+            print("\nMISSED TRANSITIONS (attempted but not added):")
+            for t in missed_transitions:
+                print(f"  {t[0]} --{t[1]}--> {t[2]} ({t[3]})")
+
+        # Before trimming, check if the result has initial and accepting states
+        if result.initial_state is None:
+            print("\nWARNING: Result FSA has no initial state!")
+
+        if not result.accepting_states:
+            print("\nWARNING: Result FSA has no accepting states!")
+
+        # Print all transitions in result FSA
+        print("\nRESULT FSA TRANSITIONS:")
+        for (src, symbol), dst_set in result.transitions.items():
+            for dst in dst_set:
+                print(f"  {src.label} --{symbol}--> {dst.label}")
+
+        # Check if there's a path from initial state to an accepting state
+        if result.initial_state:
+            path_found = False
+            visited = set()
+            frontier = [(result.initial_state.id, [])]  # (state_id, path)
+
+            print("\nPATH ANALYSIS:")
+            while frontier and not path_found:
+                state_id, path = frontier.pop(0)
+                if state_id in visited:
+                    continue
+
+                visited.add(state_id)
+                state = result.states[state_id]
+
+                if state in result.accepting_states:
+                    path_found = True
+                    print(f"OK: Found path(s) from initial to accepting states")
+                    break
+
+                for (src, sym), dst_set in result.transitions.items():
+                    if src.id == state_id:
+                        for dst in dst_set:
+                            if dst.id not in visited:
+                                new_path = path + [(sym, dst.id)]
+                                frontier.append((dst.id, new_path))
+
+            if not path_found:
+                print("WARNING: No path found from initial to accepting states!")
 
         # Remove any unnecessary states and transitions
-        return result.trim().minimize()
+        print("\nSTARTING TRIM OPERATION...")
+        trimmed_result = result.trim()
+        print(
+            f"DEBUG: After trimming: {trimmed_result.num_states} states, {len(trimmed_result.transitions)} transitions"
+        )
+
+        # Check if the trim made the FSA empty
+        if trimmed_result.num_states == 0:
+            print("CRITICAL ERROR: Trimming resulted in an empty FSA!")
+            print("This likely means there's no path from initial to accepting states.")
+            return result  # Return the untrimmed FSA for debugging
+
+        print("\nRESULT FSA AFTER TRIMMING:")
+        for (src, symbol), dst_set in trimmed_result.transitions.items():
+            for dst in dst_set:
+                print(f"  {src.label} --{symbol}--> {dst.label}")
+
+        fsa = trimmed_result.determinize().minimize()
+
+        return fsa
 
 
 def convert_fo_to_fsa(formula, alphabet=None):

@@ -8,16 +8,20 @@ class State:
     Represents a state in a finite state automaton
     """
 
-    def __init__(self, id, label=None):
+    def __init__(self, id, origin=None, label=None):
         """
         Initialize a state
 
         Args:
             id: Numeric ID for the state
+            origin: Tuple representing the history/origin of the state
             label: Optional label for the state (defaults to str(id))
         """
         self.id = id
-        self.label = label if label is not None else str(id)
+        # Initialize origin as a tuple containing just this state's ID if not provided
+        self.origin = origin if origin is not None else (id,)
+        # Use the label if provided, otherwise use the origin tuple representation
+        self.label = label if label is not None else str(self.origin)
 
     def __eq__(self, other):
         if isinstance(other, State):
@@ -30,7 +34,7 @@ class State:
         return hash(self.id)
 
     def __repr__(self):
-        return f"State({self.id}, '{self.label}')"
+        return f"State({self.id}, origin={self.origin}, '{self.label}')"
 
     def __str__(self):
         return self.label
@@ -56,7 +60,7 @@ class FiniteStateAutomaton:
 
         self.num_symbols = len(self.alphabet)
 
-        # Create state objects
+        # Create state objects with origin tracking
         self.states = [State(i) for i in range(num_states)]
         self.num_states = num_states
 
@@ -94,6 +98,7 @@ class FiniteStateAutomaton:
         from_obj = self._get_state_obj(from_state)
         to_obj = self._get_state_obj(to_state)
         self.transitions[(from_obj, symbol)] = to_obj
+        print(f"Transition: {from_obj} --{symbol}--> {to_obj}")
 
     def set_initial_state(self, state):
         """Set the initial state"""
@@ -125,6 +130,7 @@ class FiniteStateAutomaton:
     def minimize(self):
         """
         Create a new minimized FSA using Hopcroft's algorithm.
+        States are labeled with tuples containing the original state origins.
 
         Returns:
             FiniteStateAutomaton: A minimized version of this FSA
@@ -139,18 +145,29 @@ class FiniteStateAutomaton:
         partition = [p for p in partition if p]
 
         # Repeatedly refine the partition until no more refinement is possible
-        new_partition = []
-        while new_partition != partition:
+        old_partition = []
+        while old_partition != partition:
+            old_partition = partition.copy()
             new_partition = []
             for group in partition:
                 # Split each group based on transitions
                 split_groups = defaultdict(set)
                 for state in group:
-                    # Create a signature for this state based on its transitions to other groups
-                    signature = tuple(
-                        self.transition(state, symbol) for symbol in self.alphabet
-                    )
-                    split_groups[signature].add(state)
+                    # Create a signature for this state based on transitions to other groups
+                    signature = []
+                    for symbol in self.alphabet:
+                        next_state = self.transition(state, symbol)
+                        if next_state is None:
+                            signature.append(-1)  # Special value for no transition
+                        else:
+                            # Find which group the next state belongs to
+                            group_idx = next(
+                                i for i, g in enumerate(partition) if next_state in g
+                            )
+                            signature.append(group_idx)
+
+                    # Use the signature to group similar states
+                    split_groups[tuple(signature)].add(state)
 
                 # Add each split group to the new partition
                 new_partition.extend(split_groups.values())
@@ -161,23 +178,45 @@ class FiniteStateAutomaton:
         if not partition:
             return FiniteStateAutomaton(0, self.alphabet)
 
-        # Create a mapping from old states to new states
-        state_map = {state: i for i, group in enumerate(partition) for state in group}
-
         # Create new minimal FSA
         result = FiniteStateAutomaton(len(partition), self.alphabet)
+
+        # Create a mapping from old states to new states
+        state_map = {}
+        for i, group in enumerate(partition):
+            # Combine the origins of all states in the group
+            # Convert all origin elements to strings before sorting to avoid type comparison issues
+            # combined_origin = tuple(
+            #     sorted(str(origin) for state in group for origin in state.origin)
+            # )
+            combined_origin = tuple(
+                str(origin) for state in group for origin in state.origin
+            )
+
+            # Create a new state with the combined origins
+            result.states[i] = State(i, origin=combined_origin)
+
+            # Map each state in the group to the new state ID
+            for state in group:
+                state_map[state] = i
 
         # Map initial state
         if self.initial_state:
             result.set_initial_state(state_map[self.initial_state])
 
         # Map accepting states
-        for old_state in self.accepting_states:
-            result.set_accepting_state(state_map[old_state])
+        for i, group in enumerate(partition):
+            if any(state in self.accepting_states for state in group):
+                result.set_accepting_state(i)
 
         # Map transitions
-        for (src, symbol), dst in self.transitions.items():
-            result.set_transition(state_map[src], symbol, state_map[dst])
+        for i, group in enumerate(partition):
+            representative = min(group, key=lambda s: s.id)
+            for symbol in self.alphabet:
+                next_state = self.transition(representative, symbol)
+                if next_state is not None:
+                    next_group = state_map[next_state]
+                    result.set_transition(i, symbol, next_group)
 
         return result
 
@@ -191,7 +230,7 @@ class FiniteStateAutomaton:
     def intersect(self, other):
         """
         Create an FSA that accepts the intersection of languages accepted by self and other.
-        Uses the standard product construction.
+        Uses the standard product construction and tracks origin of states.
         """
         # Check if either automaton has no initial state
         if self.initial_state is None or other.initial_state is None:
@@ -205,19 +244,30 @@ class FiniteStateAutomaton:
         # Create a mapping from pairs of states to the new state IDs
         state_map = {}
         counter = 0
-        for q1 in range(self.num_states):
-            for q2 in range(other.num_states):
-                state_map[(q1, q2)] = counter
+        for s1 in range(self.num_states):
+            for s2 in range(other.num_states):
+                state_map[(s1, s2)] = counter
+
+                # Get the original states
+                state1 = self.states[s1]
+                state2 = other.states[s2]
+
+                # Combine their origins - convert all to strings for consistency
+                combined_origin = tuple(str(o) for o in state1.origin + state2.origin)
+
+                # Set the state with the combined origin
+                result.states[counter] = State(counter, origin=combined_origin)
+
                 counter += 1
 
         # Set transitions
-        for (q1, q2), q in state_map.items():
+        for (s1, s2), q in state_map.items():
             for symbol in self.alphabet:
-                next_q1 = self.transition(q1, symbol)
-                next_q2 = other.transition(q2, symbol)
+                next_s1 = self.transition(s1, symbol)
+                next_s2 = other.transition(s2, symbol)
 
-                if next_q1 is not None and next_q2 is not None:
-                    next_q = state_map[(next_q1.id, next_q2.id)]
+                if next_s1 is not None and next_s2 is not None:
+                    next_q = state_map[(next_s1.id, next_s2.id)]
                     result.set_transition(q, symbol, next_q)
 
         # Set initial state
@@ -225,10 +275,10 @@ class FiniteStateAutomaton:
             state_map[(self.initial_state.id, other.initial_state.id)]
         )
 
-        # Set accepting states - for intersection, a state is accepting if both components are accepting
-        for (q1, q2), q in state_map.items():
-            state1 = self.states[q1]
-            state2 = other.states[q2]
+        # Set accepting states
+        for (s1, s2), q in state_map.items():
+            state1 = self.states[s1]
+            state2 = other.states[s2]
             if state1 in self.accepting_states and state2 in other.accepting_states:
                 result.set_accepting_state(q)
 
@@ -237,7 +287,7 @@ class FiniteStateAutomaton:
     def union(self, other):
         """
         Create an FSA that accepts the union of languages accepted by self and other.
-        Uses the standard product construction.
+        Uses the standard product construction and tracks origin of states.
         """
         # Check if either automaton has no initial state
         if self.initial_state is None and other.initial_state is None:
@@ -255,19 +305,30 @@ class FiniteStateAutomaton:
         # Create a mapping from pairs of states to the new state IDs
         state_map = {}
         counter = 0
-        for q1 in range(self.num_states):
-            for q2 in range(other.num_states):
-                state_map[(q1, q2)] = counter
+        for s1 in range(self.num_states):
+            for s2 in range(other.num_states):
+                state_map[(s1, s2)] = counter
+
+                # Get the original states
+                state1 = self.states[s1]
+                state2 = other.states[s2]
+
+                # Combine their origins
+                combined_origin = state1.origin + state2.origin
+
+                # Set the state with the combined origin
+                result.states[counter] = State(counter, origin=combined_origin)
+
                 counter += 1
 
         # Set transitions
-        for (q1, q2), q in state_map.items():
+        for (s1, s2), q in state_map.items():
             for symbol in self.alphabet:
-                next_q1 = self.transition(q1, symbol)
-                next_q2 = other.transition(q2, symbol)
+                next_s1 = self.transition(s1, symbol)
+                next_s2 = other.transition(s2, symbol)
 
-                if next_q1 is not None and next_q2 is not None:
-                    next_q = state_map[(next_q1.id, next_q2.id)]
+                if next_s1 is not None and next_s2 is not None:
+                    next_q = state_map[(next_s1.id, next_s2.id)]
                     result.set_transition(q, symbol, next_q)
 
         # Set initial state
@@ -276,9 +337,9 @@ class FiniteStateAutomaton:
         )
 
         # Set accepting states - for union, a state is accepting if either component is accepting
-        for (q1, q2), q in state_map.items():
-            state1 = self.states[q1]
-            state2 = other.states[q2]
+        for (s1, s2), q in state_map.items():
+            state1 = self.states[s1]
+            state2 = other.states[s2]
             if state1 in self.accepting_states or state2 in other.accepting_states:
                 result.set_accepting_state(q)
 
@@ -383,7 +444,11 @@ class FiniteStateAutomaton:
 
     def trim(self):
         """
-        Create a new FSA with all unreachable and dead-end states removed.
+        Create a new FSA with all unreachable and dead-end states removed,
+        while preserving state origins.
+
+        Returns:
+            A new FSA with only useful states
         """
         # Find all reachable states from initial state
         reachable = set()
@@ -422,28 +487,142 @@ class FiniteStateAutomaton:
         if not useful_states:
             return FiniteStateAutomaton(0, self.alphabet)
 
-        # Create a new automaton with only the useful states
-        # First, create a mapping from old state IDs to new state IDs
-        old_to_new = {}
-        for new_id, old_state in enumerate(sorted(useful_states, key=lambda s: s.id)):
-            old_to_new[old_state] = State(new_id, old_state.label)
-
-        # Create the new automaton
+        # Create a new FSA with only useful states (use consecutive IDs)
         result = FiniteStateAutomaton(len(useful_states), self.alphabet)
+
+        # Create a mapping from old states to new state IDs
+        old_to_new_id = {}
+        for new_id, old_state in enumerate(sorted(useful_states, key=lambda s: s.id)):
+            old_to_new_id[old_state] = new_id
+            # Create a new state with the same origin
+            result.states[new_id] = State(new_id, origin=old_state.origin)
 
         # Copy transitions
         for (src, symbol), dst in self.transitions.items():
             if src in useful_states and dst in useful_states:
-                result.set_transition(old_to_new[src], symbol, old_to_new[dst])
+                result.set_transition(old_to_new_id[src], symbol, old_to_new_id[dst])
 
         # Copy initial state if it's useful
         if self.initial_state in useful_states:
-            result.set_initial_state(old_to_new[self.initial_state])
+            result.set_initial_state(old_to_new_id[self.initial_state])
 
         # Copy accepting states
         for state in self.accepting_states:
             if state in useful_states:
-                result.set_accepting_state(old_to_new[state])
+                result.set_accepting_state(old_to_new_id[state])
+
+        return result
+
+    def reindex(self):
+        """
+        Reindex the states of the FSA to be consecutive integers starting from 0.
+        This creates a new FSA where states have simple numeric IDs (0, 1, 2, ...).
+
+        Useful after trim() or other operations that might leave gaps in state IDs.
+
+        Returns:
+            A new FSA with reindexed states but preserving labels
+        """
+        # If automaton is empty, return an empty automaton
+        if self.num_states == 0:
+            return self.copy()
+
+        # Count actual states (some might be None after trimming)
+        actual_states = [s for s in self.states if s is not None]
+        if not actual_states:
+            return FiniteStateAutomaton(0, self.alphabet)
+
+        # Create a new FSA with the correct number of actual used states
+        result = FiniteStateAutomaton(len(actual_states), self.alphabet)
+
+        # Create a mapping from old state IDs to new consecutive IDs
+        old_to_new = {}
+        for new_id, old_state in enumerate(sorted(actual_states, key=lambda s: s.id)):
+            old_to_new[old_state.id] = new_id
+            # Preserve the original label
+            result.set_state_label(new_id, old_state.label)
+
+        # Copy transitions with new state IDs
+        for (src, symbol), dst in self.transitions.items():
+            if src.id in old_to_new and dst.id in old_to_new:
+                result.set_transition(old_to_new[src.id], symbol, old_to_new[dst.id])
+
+        # Set initial state if it exists
+        if self.initial_state is not None and self.initial_state.id in old_to_new:
+            result.set_initial_state(old_to_new[self.initial_state.id])
+
+        # Copy accepting states
+        for state in self.accepting_states:
+            if state.id in old_to_new:
+                result.set_accepting_state(old_to_new[state.id])
+
+        return result
+
+    def retuple(self):
+        """
+        Process complex state labels created during minimize, intersect, etc.
+        Extracts structured tuple information from state labels and flattens them.
+
+        Returns:
+            A new FSA with simplified tuple-based labels
+        """
+        result = self.copy()
+
+        for state in result.states:
+            if state is not None:
+                label = state.label
+
+                # Handle special meta-labels from minimize with format "group:(1,2,3)|labels:..."
+                if (
+                    isinstance(label, str)
+                    and label.startswith("group:")
+                    and "|labels:" in label
+                ):
+                    # Extract the group IDs part
+                    group_part = label.split("|labels:")[0].replace("group:", "")
+                    try:
+                        # Evaluate the tuple string to get the actual tuple
+                        ids_tuple = eval(group_part)
+                        # Just use the tuple directly as a string representation
+                        state.label = str(ids_tuple)
+                    except Exception as e:
+                        # Fall back to manual string parsing if eval fails
+                        if group_part.startswith("(") and group_part.endswith(")"):
+                            content = group_part[1:-1]  # Remove parentheses
+                            parts = [p.strip() for p in content.split(",")]
+                            state.label = f"({','.join(parts)})"
+                        else:
+                            # Keep original if we can't parse
+                            pass
+
+                # Handle product construction labels with format "(1,2)|label1,label2"
+                elif (
+                    isinstance(label, str)
+                    and "|" in label
+                    and label.startswith("(")
+                    and ")" in label
+                ):
+                    # Extract just the ID part before the pipe
+                    id_part = label.split("|")[0]
+                    # Use just the ID part which is already in tuple format
+                    state.label = id_part
+
+                # Handle set notation {x,y,z}
+                elif (
+                    isinstance(label, str)
+                    and label.startswith("{")
+                    and label.endswith("}")
+                ):
+                    content = label[1:-1]  # Remove braces
+                    parts = [p.strip() for p in content.split(",")]
+                    state.label = f"({','.join(parts)})"
+
+                # Handle other formats
+                elif isinstance(label, str) and "," in label:
+                    # This might be a comma-separated list that needs to be wrapped
+                    if not (label.startswith("(") and label.endswith(")")):
+                        parts = [p.strip() for p in label.split(",")]
+                        state.label = f"({','.join(parts)})"
 
         return result
 
@@ -453,66 +632,76 @@ class FiniteStateAutomaton:
 
     def ascii(self):
         """
-        Generate a clear ASCII representation of the FSA
+        Generate a text-based visualization of the FSA.
         """
         lines = []
-        lines.append("=" * 50)
-        lines.append("FINITE STATE AUTOMATON")
-        lines.append("=" * 50)
 
-        # Basic information
-        lines.append(f"States: {self.num_states} (0 to {self.num_states - 1})")
-        lines.append(f"Alphabet: {self.alphabet}")
+        # Title
+        if self.num_states == 0:
+            lines.append("Empty FSA")
+            return "\n".join(lines)
 
-        initial_str = "None"
-        if self.initial_state:
-            initial_str = f"{self.initial_state.id} ({self.initial_state.label})"
-        lines.append(f"Initial state: {initial_str}")
+        lines.append(f"FSA with {self.num_states} states")
 
-        accepting_str = "[]"
-        if self.accepting_states:
-            accepting_str = ", ".join(
-                [
-                    f"{s.id} ({s.label})"
-                    for s in sorted(self.accepting_states, key=lambda s: s.id)
-                ]
-            )
-        lines.append(f"Accepting states: [{accepting_str}]")
-        lines.append("-" * 50)
+        # States
+        lines.append("\nSTATES:")
+        for q in range(self.num_states):
+            state = self.states[q]
+            if state is None:
+                continue
+
+            state_desc = f"{q}: {state.label}"
+            if state == self.initial_state:
+                state_desc += " (initial)"
+            if state in self.accepting_states:
+                state_desc += " (accepting)"
+            lines.append(state_desc)
 
         # Transition table
-        lines.append("TRANSITION TABLE:")
-        header = "State |" + "".join(f" {sym:^5} |" for sym in self.alphabet)
+        lines.append("\nTRANSITION TABLE:")
+
+        # Handle tuple symbols in the alphabet by converting them to strings
+        # symbol_strs = [str(sym) for sym in self.alphabet]
+        # max_sym_len = max(len(s) for s in symbol_strs) if symbol_strs else 5
+        max_sym_len = 25
+        format_str = f" {{:^{max_sym_len}}} |"
+
+        # Create header with properly formatted symbol strings
+        header = "State                      |" + "".join(
+            format_str.format(str(sym)) for sym in self.alphabet
+        )
         lines.append(header)
         lines.append("-" * len(header))
 
-        for state in self.states:
-            # Mark initial and accepting states
-            if state == self.initial_state and state in self.accepting_states:
-                state_marker = f"→({state.id}:{state.label})←"
-            elif state == self.initial_state:
-                state_marker = f"→{state.id}:{state.label}  "
-            elif state in self.accepting_states:
-                state_marker = f" ({state.id}:{state.label})←"
-            else:
-                state_marker = f"  {state.id}:{state.label}  "
+        # Add transitions
+        for q in range(self.num_states):
+            state = self.states[q]
+            if state is None:
+                continue
 
-            # Trim if too long
-            if len(state_marker) > 12:
-                state_marker = state_marker[:9] + "..."
+            # Prefix for state (marking initial/accepting)
+            prefix = ""
+            if state == self.initial_state:
+                prefix += ">"
+            if state in self.accepting_states:
+                prefix += "*"
+            if state != self.initial_state and state not in self.accepting_states:
+                prefix += " "
 
-            row = f"{state_marker:12} |"
+            row = f"{prefix}{state.label:3} |"
 
+            # Add each transition
             for symbol in self.alphabet:
                 next_state = self.transition(state, symbol)
-                cell = "-"
                 if next_state is not None:
-                    cell = str(next_state.id)
-                row += f" {cell:^4} |"
+                    cell = f" {next_state.label:^{max_sym_len}} |"
+                else:
+                    cell = f" {'-':^{max_sym_len}} |"
+                row += cell
+
             lines.append(row)
 
-        lines.append("-" * len(header))
-        print("\n".join(lines))
+        return "\n".join(lines)
 
     def _repr_html_(self):
         """
@@ -531,11 +720,12 @@ class FiniteStateAutomaton:
         # Add node for initial state
         if self.initial_state is not None:
             q = self.initial_state
+            # Just use the label directly without str() conversion
+            label = q.label
+
             if q in self.accepting_states:
-                label = str(q)
                 color = "af8dc3"  # Purple for initial+accepting
             else:
-                label = str(q)
                 color = "66c2a5"  # Green for initial
 
             ret.append(
@@ -546,12 +736,16 @@ class FiniteStateAutomaton:
 
         # Add nodes for normal states
         for q in self.states:
-            if q in self.accepting_states:
+            if q is None or q in self.accepting_states:
                 continue
             if q == self.initial_state:
                 continue  # Skip initial state, already added
+
+            # Just use the label directly
+            label = q.label
+
             ret.append(
-                f'g.setNode("{q.id}",{{label:{json.dumps(str(q))},shape:"circle"}});\n'
+                f'g.setNode("{q.id}",{{label:{json.dumps(label)},shape:"circle"}});\n'
             )
             ret.append(
                 f'g.node("{q.id}").style = "fill: #8da0cb"; \n'
@@ -561,8 +755,12 @@ class FiniteStateAutomaton:
         for q in self.accepting_states:
             if q == self.initial_state:
                 continue  # Skip initial+accepting, already added
+
+            # Just use the label directly
+            label = q.label
+
             ret.append(
-                f'g.setNode("{q.id}",{{label:{json.dumps(str(q))},shape:"circle"}});\n'
+                f'g.setNode("{q.id}",{{label:{json.dumps(label)},shape:"circle"}});\n'
             )
             ret.append(
                 f'g.node("{q.id}").style = "fill: #fc8d62"; \n'
@@ -573,7 +771,6 @@ class FiniteStateAutomaton:
             to = defaultdict(list)
             for symbol, next_state in self.get_transitions(q):
                 to[next_state].append(str(symbol))
-
             for d, values in to.items():
                 if len(values) > 6:
                     values = values[0:3] + [". . ."]
