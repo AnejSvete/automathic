@@ -313,8 +313,8 @@ class FiniteStateAutomaton:
                 state1 = self.states[s1]
                 state2 = other.states[s2]
 
-                # Combine their origins
-                combined_origin = state1.origin + state2.origin
+                # Combine their origins - convert all to strings for consistency
+                combined_origin = tuple(str(o) for o in state1.origin + state2.origin)
 
                 # Set the state with the combined origin
                 result.states[counter] = State(counter, origin=combined_origin)
@@ -517,11 +517,12 @@ class FiniteStateAutomaton:
         """
         Reindex the states of the FSA to be consecutive integers starting from 0.
         This creates a new FSA where states have simple numeric IDs (0, 1, 2, ...).
+        The method resets the state labels to match their new IDs.
 
         Useful after trim() or other operations that might leave gaps in state IDs.
 
         Returns:
-            A new FSA with reindexed states but preserving labels
+            A new FSA with reindexed states and simple numeric labels
         """
         # If automaton is empty, return an empty automaton
         if self.num_states == 0:
@@ -539,8 +540,8 @@ class FiniteStateAutomaton:
         old_to_new = {}
         for new_id, old_state in enumerate(sorted(actual_states, key=lambda s: s.id)):
             old_to_new[old_state.id] = new_id
-            # Preserve the original label
-            result.set_state_label(new_id, old_state.label)
+            # Set the label to match the new ID instead of preserving old label
+            result.set_state_label(new_id, str(new_id))
 
         # Copy transitions with new state IDs
         for (src, symbol), dst in self.transitions.items():
@@ -561,7 +562,7 @@ class FiniteStateAutomaton:
     def retuple(self):
         """
         Process complex state labels created during minimize, intersect, etc.
-        Extracts structured tuple information from state labels and flattens them.
+        Extracts all numbers from state labels and creates a simplified tuple representation.
 
         Returns:
             A new FSA with simplified tuple-based labels
@@ -569,60 +570,23 @@ class FiniteStateAutomaton:
         result = self.copy()
 
         for state in result.states:
-            if state is not None:
-                label = state.label
+            if state is None:
+                continue
 
-                # Handle special meta-labels from minimize with format "group:(1,2,3)|labels:..."
-                if (
-                    isinstance(label, str)
-                    and label.startswith("group:")
-                    and "|labels:" in label
-                ):
-                    # Extract the group IDs part
-                    group_part = label.split("|labels:")[0].replace("group:", "")
-                    try:
-                        # Evaluate the tuple string to get the actual tuple
-                        ids_tuple = eval(group_part)
-                        # Just use the tuple directly as a string representation
-                        state.label = str(ids_tuple)
-                    except Exception as e:
-                        # Fall back to manual string parsing if eval fails
-                        if group_part.startswith("(") and group_part.endswith(")"):
-                            content = group_part[1:-1]  # Remove parentheses
-                            parts = [p.strip() for p in content.split(",")]
-                            state.label = f"({','.join(parts)})"
-                        else:
-                            # Keep original if we can't parse
-                            pass
+            label = state.label
 
-                # Handle product construction labels with format "(1,2)|label1,label2"
-                elif (
-                    isinstance(label, str)
-                    and "|" in label
-                    and label.startswith("(")
-                    and ")" in label
-                ):
-                    # Extract just the ID part before the pipe
-                    id_part = label.split("|")[0]
-                    # Use just the ID part which is already in tuple format
-                    state.label = id_part
+            # Skip if already a simple number
+            if isinstance(label, str) and label.isdigit():
+                continue
 
-                # Handle set notation {x,y,z}
-                elif (
-                    isinstance(label, str)
-                    and label.startswith("{")
-                    and label.endswith("}")
-                ):
-                    content = label[1:-1]  # Remove braces
-                    parts = [p.strip() for p in content.split(",")]
-                    state.label = f"({','.join(parts)})"
+            # Extract all numbers from the label
+            import re
 
-                # Handle other formats
-                elif isinstance(label, str) and "," in label:
-                    # This might be a comma-separated list that needs to be wrapped
-                    if not (label.startswith("(") and label.endswith(")")):
-                        parts = [p.strip() for p in label.split(",")]
-                        state.label = f"({','.join(parts)})"
+            numbers = re.findall(r"\d+", str(label))
+
+            if numbers:
+                # Create a simple tuple representation with the extracted numbers
+                state.label = f"({','.join(numbers)})"
 
         return result
 
@@ -706,7 +670,12 @@ class FiniteStateAutomaton:
     def _repr_html_(self):
         """
         When returned from a Jupyter cell, this will generate the FSA visualization
+        with distinct colors and thicker borders for accepting states
         """
+        import json
+        from collections import defaultdict
+        from uuid import uuid4
+
         ret = []
         if self.num_states == 0:
             return "<code>Empty FSA</code>"
@@ -717,85 +686,99 @@ class FiniteStateAutomaton:
                 + f"<code>FSA(states={self.num_states})</code>"
             )
 
-        # Add node for initial state
-        if self.initial_state is not None:
-            q = self.initial_state
-            # Just use the label directly without str() conversion
-            label = q.label
+        # Define color schemes based on theme
+        if hasattr(self, "theme") and self.theme == "dark":
+            colors = {
+                "normal": "4c566a",  # Dark blue-gray
+                "initial": "88c0d0",  # Bright blue
+                "accepting": "bf616a",  # Soft red
+                "initial_accepting": "ebcb8b",  # Gold
+            }
+            stroke_color = "rgb(192, 192, 192)"  # Light gray for dark theme
+            text_color = "#ffffff"  # White text for dark theme
+        else:
+            colors = {
+                "normal": "e9f0f7",  # Light blue
+                "initial": "9fd3c7",  # Teal green
+                "accepting": "ffcab0",  # Soft coral
+                "initial_accepting": "ecdfc8",  # Beige
+            }
+            stroke_color = "#333"  # Dark gray for light theme
+            text_color = "#000000"  # Black text for light theme
 
-            if q in self.accepting_states:
-                color = "af8dc3"  # Purple for initial+accepting
-            else:
-                color = "66c2a5"  # Green for initial
-
-            ret.append(
-                f'g.setNode("{q.id}", '
-                + f'{{ label: {json.dumps(label)} , shape: "circle" }});\n'
-            )
-            ret.append(f'g.node("{q.id}").style = "fill: #{color}"; \n')
-
-        # Add nodes for normal states
+        # Add all states with explicit labels
         for q in self.states:
-            if q is None or q in self.accepting_states:
+            if q is None:
                 continue
-            if q == self.initial_state:
-                continue  # Skip initial state, already added
 
-            # Just use the label directly
-            label = q.label
+            # Explicitly convert the label to string
+            node_label = str(q.label).replace('"', '\\"').replace("'", "")
 
+            # Determine node style - use stroke-width for accepting states
+            if q == self.initial_state and q in self.accepting_states:
+                color = colors["initial_accepting"]
+                border = 3  # Thicker border for accepting states
+            elif q == self.initial_state:
+                color = colors["initial"]
+                border = 1  # Normal border
+            elif q in self.accepting_states:
+                color = colors["accepting"]
+                border = 3  # Thicker border for accepting states
+            else:
+                color = colors["normal"]
+                border = 1  # Normal border
+
+            # Create node with proper styling
             ret.append(
-                f'g.setNode("{q.id}",{{label:{json.dumps(label)},shape:"circle"}});\n'
+                f'g.setNode("{q.id}", {{ '
+                f'label: "{node_label}", '
+                f'shape: "circle", '
+                f'style: "fill: #{color}; stroke: {stroke_color}; stroke-width: {border}px;" '
+                f"}});\n"
             )
-            ret.append(
-                f'g.node("{q.id}").style = "fill: #8da0cb"; \n'
-            )  # Blue for normal
-
-        # Add nodes for accepting states
-        for q in self.accepting_states:
-            if q == self.initial_state:
-                continue  # Skip initial+accepting, already added
-
-            # Just use the label directly
-            label = q.label
-
-            ret.append(
-                f'g.setNode("{q.id}",{{label:{json.dumps(label)},shape:"circle"}});\n'
-            )
-            ret.append(
-                f'g.node("{q.id}").style = "fill: #fc8d62"; \n'
-            )  # Orange for accepting
 
         # Add edges for transitions
         for q in self.states:
+            if q is None:
+                continue
+
             to = defaultdict(list)
             for symbol, next_state in self.get_transitions(q):
                 to[next_state].append(str(symbol))
+
             for d, values in to.items():
                 if len(values) > 6:
                     values = values[0:3] + [". . ."]
-                label = json.dumps(", ".join(values))
-                color = "rgb(192, 192, 192)" if self.theme == "dark" else "#333"
-                edge_string = (
-                    f'g.setEdge("{q.id}","{d.id}",{{arrowhead:"vee",'
-                    + f'label:{label},"style": "stroke: {color}; fill: none;", '
-                    + f'"labelStyle": "fill: {color}; stroke: {color}; ", '
-                    + f'"arrowheadStyle": "fill: {color}; stroke: {color};"}});\n'
+                edge_label = ", ".join(values)
+                ret.append(
+                    f'g.setEdge("{q.id}", "{d.id}", {{ '
+                    f'label: "{edge_label}", '  # Use simple quotes
+                    f'arrowhead: "vee", '
+                    f'style: "stroke: {stroke_color}; fill: none;", '
+                    f'labelStyle: "fill: {stroke_color};", '
+                    f'arrowheadStyle: "fill: {stroke_color}; stroke: {stroke_color};" '
+                    f"}});\n"
                 )
-                ret.append(edge_string)
 
-        # # Add a special invisible node and edge for initial state marker
-        # if self.initial_state is not None:
-        #     color = "rgb(192, 192, 192)" if self.theme == "dark" else "#333"
-        #     ini_id = self.initial_state.id
-        #     ret.append(f'g.setNode("start", {{label:"", width:0, height:0}});\n')
-        #     edge_string = (
-        #         f'g.setEdge("start","{ini_id}",{{arrowhead:"vee",'
-        #         + f'label:"","style": "stroke: {color}; fill: none;", '
-        #         + f'"labelStyle": "fill: {color}; stroke: {color}; ", '
-        #         + f'"arrowheadStyle": "fill: {color}; stroke: {color};"}});\n'
-        #     )
-        #     ret.append(edge_string)
+        # Add a special invisible node and edge for initial state marker
+        if self.initial_state is not None:
+            ini_id = self.initial_state.id
+            ret.append(
+                f'g.setNode("start", {{ '
+                f'label: "", '
+                f"width: 0, "
+                f"height: 0, "
+                f'style: "opacity: 0" '
+                f"}});\n"
+            )
+            ret.append(
+                f'g.setEdge("start", "{ini_id}", {{ '
+                f'label: "", '
+                f'arrowhead: "normal", '
+                f'style: "stroke: {stroke_color}; fill: none;", '
+                f'arrowheadStyle: "fill: {stroke_color}; stroke: {stroke_color};" '
+                f"}});\n"
+            )
 
         # If the machine is too big, don't attempt to display it
         if len(ret) > 256:
@@ -807,50 +790,73 @@ class FiniteStateAutomaton:
         # Build the HTML with embedded JavaScript
         ret2 = [
             """
-       <script>
-       try {
-       require.config({
-       paths: {
-       "d3": "https://cdnjs.cloudflare.com/ajax/libs/d3/4.13.0/d3",
-       "dagreD3": "https://cdnjs.cloudflare.com/ajax/libs/dagre-d3/0.6.1/dagre-d3.min"
-       }
-       });
-       } catch {
-       ["https://cdnjs.cloudflare.com/ajax/libs/d3/4.13.0/d3.js",
-       "https://cdnjs.cloudflare.com/ajax/libs/dagre-d3/0.6.1/dagre-d3.min.js"].forEach(
-            function (src) {
-            var tag = document.createElement('script');
-            tag.src = src;
-            document.body.appendChild(tag);
-            }
-        )
+        <script>
+        try {
+            require.config({
+                paths: {
+                    "d3": "https://cdnjs.cloudflare.com/ajax/libs/d3/4.13.0/d3",
+                    "dagreD3": "https://cdnjs.cloudflare.com/ajax/libs/dagre-d3/0.6.1/dagre-d3.min"
+                }
+            });
+        } catch (e) {
+            ["https://cdnjs.cloudflare.com/ajax/libs/d3/4.13.0/d3.js",
+            "https://cdnjs.cloudflare.com/ajax/libs/dagre-d3/0.6.1/dagre-d3.min.js"].forEach(
+                function (src) {
+                    var tag = document.createElement('script');
+                    tag.src = src;
+                    document.body.appendChild(tag);
+                }
+            );
         }
         try {
-        requirejs(['d3', 'dagreD3'], function() {});
+            requirejs(['d3', 'dagreD3'], function() {});
         } catch (e) {}
         try {
-        require(['d3', 'dagreD3'], function() {});
+            require(['d3', 'dagreD3'], function() {});
         } catch (e) {}
         </script>
-        <style>
-        .node rect,
-        .node circle,
-        .node ellipse {
-        stroke: #333;
-        fill: #fff;
-        stroke-width: 1px;
-        }
-
-        .edgePath path {
-        stroke: #333;
-        fill: #333;
-        stroke-width: 1.5px;
-        }
-        </style>
         """
         ]
 
-        obj = "fsa_" + uuid4().hex
+        # Add theme-specific styles
+        ret2.append(
+            f"""
+        <style>
+        /* Import LaTeX-like font */
+        @import url('https://fonts.googleapis.com/css2?family=Source+Serif+Pro:wght@400;600&display=swap');
+        
+        .node rect,
+        .node circle,
+        .node ellipse {{
+            stroke: {stroke_color};
+            /* Don't set stroke-width here, it's applied per-node */
+        }}
+        
+        .edgePath path {{
+            stroke: {stroke_color};
+            fill: {stroke_color};
+            stroke-width: 1.5px;
+        }}
+        
+        /* LaTeX-like typography */
+        .node text {{
+            font-family: 'Source Serif Pro', 'Computer Modern', 'Latin Modern Math', serif;
+            font-size: 14px;
+            font-weight: normal;
+            fill: {text_color} !important; /* Force text color */
+        }}
+        
+        .edgeLabel text {{
+            font-family: 'Source Serif Pro', 'Computer Modern', 'Latin Modern Math', serif;
+            font-size: 12px;
+            font-weight: normal;
+            fill: {stroke_color} !important; /* Force edge label color */
+        }}
+        </style>
+        """
+        )
+
+        obj = "fsa_" + str(uuid4()).replace("-", "_")
         ret2.append(
             f'<center><svg width="850" height="600" id="{obj}"><g/></svg></center>'
         )
@@ -858,50 +864,67 @@ class FiniteStateAutomaton:
             """
         <script>
         (function render_d3() {
-        var d3, dagreD3;
-        try { // requirejs is broken on external domains
-          d3 = require('d3');
-          dagreD3 = require('dagreD3');
-        } catch (e) {
-          // for google colab
-          if(typeof window.d3 !== "undefined" && typeof window.dagreD3 !== "undefined"){
-            d3 = window.d3;
-            dagreD3 = window.dagreD3;
-          } else { // not loaded yet, so wait and try again
-            setTimeout(render_d3, 50);
-            return;
-          }
-        }
-        var g = new dagreD3.graphlib.Graph().setGraph({ 'rankdir': 'LR' });
+            var d3, dagreD3;
+            try {
+                d3 = require('d3');
+                dagreD3 = require('dagreD3');
+            } catch (e) {
+                if(typeof window.d3 !== "undefined" && typeof window.dagreD3 !== "undefined"){
+                    d3 = window.d3;
+                    dagreD3 = window.dagreD3;
+                } else {
+                    setTimeout(render_d3, 50);
+                    return;
+                }
+            }
+            
+            // Create directed graph
+            var g = new dagreD3.graphlib.Graph().setGraph({
+                rankdir: 'LR',
+                marginx: 20,
+                marginy: 20,
+                ranksep: 50,
+                nodesep: 30
+            });
         """
         )
         ret2.append("".join(ret))
 
         ret2.append(f'var svg = d3.select("#{obj}"); \n')
         ret2.append(
-            """
-        var inner = svg.select("g");
-
-        // Set up zoom support
-        var zoom = d3.zoom().scaleExtent([0.3, 5]).on("zoom", function() {
-        inner.attr("transform", d3.event.transform);
-        });
-        svg.call(zoom);
-
-        // Create the renderer
-        var render = new dagreD3.render();
-
-        // Run the renderer. This is what draws the final graph.
-        render(inner, g);
-
-        // Center the graph
-        var initialScale = 0.75;
-        svg.call(zoom.transform, d3.zoomIdentity.translate(
-            (svg.attr("width")-g.graph().width*initialScale)/2,20).scale(initialScale));
-
-        svg.attr('height', g.graph().height * initialScale + 50);
-        })();
-
+            f"""
+            var inner = svg.select("g");
+            
+            // Set up zoom support
+            var zoom = d3.zoom().scaleExtent([0.3, 5]).on("zoom", function() {{
+                inner.attr("transform", d3.event.transform);
+            }});
+            svg.call(zoom);
+            
+            // Create the renderer
+            var render = new dagreD3.render();
+            
+            // Render the graph
+            render(inner, g);
+            
+            // Hide start node and apply styles after rendering
+            if (g.hasNode("start")) {{
+                d3.select(g.node("start").elem).style("opacity", "0");
+            }}
+            
+            // Force labels to be visible with correct colors
+            inner.selectAll("g.node text").style("fill", "{text_color}");
+            inner.selectAll(".edgeLabel text").style("fill", "{stroke_color}");
+            
+            // Center the graph
+            var initialScale = 0.75;
+            svg.call(zoom.transform, d3.zoomIdentity
+                .translate((svg.attr("width") - g.graph().width * initialScale) / 2, 20)
+                .scale(initialScale));
+                
+            // Adjust SVG height to fit graph
+            svg.attr('height', g.graph().height * initialScale + 40);
+        }})();
         </script>
         """
         )
