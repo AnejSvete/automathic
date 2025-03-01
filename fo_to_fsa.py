@@ -90,7 +90,7 @@ class FOtoFSA:
         if formula.is_sentence():
             return self._project(fsa)
         else:
-            return fsa
+            return fsa, formula_fsa, V_structure_fsa
 
     def _project(self, fsa):
         """Project the automaton transitions to alphabet symbols only
@@ -164,7 +164,11 @@ class FOtoFSA:
         elif isinstance(formula, Relation):
             return self._convert_relation(formula, alphabet)
         elif isinstance(formula, Negation):
+            # print("DEBUG: Negation")
+            # X = self._convert(formula.subformula, V, alphabet)
+            # print(X.ascii())
             return self._convert(formula.subformula, V, alphabet).complement()
+            # return X.complement()
         elif isinstance(formula, Conjunction):
             return self._convert(formula.left, V, alphabet).intersect(
                 self._convert(formula.right, V, alphabet)
@@ -179,10 +183,11 @@ class FOtoFSA:
                 self._convert(formula.subformula, V, alphabet), V, formula.variable
             )
         elif isinstance(formula, UniversalQuantifier):
-            # For universal quantification, we use the equivalence: ∀x.φ(x) ≡ ¬∃x.¬φ(x)
-            negated_sub = Negation(formula.subformula)
-            existential = ExistentialQuantifier(formula.variable, negated_sub)
-            return self._convert(existential, V, alphabet)
+            raise ValueError("Universal quantification is not supported")
+            # # For universal quantification, we use the equivalence: ∀x.φ(x) ≡ ¬∃x.¬φ(x)
+            # negated_sub = Negation(formula.subformula)
+            # existential = ExistentialQuantifier(formula.variable, negated_sub)
+            # return self._convert(existential, V, alphabet)
         else:
             raise ValueError(f"Unsupported formula type: {type(formula).__name__}")
 
@@ -264,19 +269,6 @@ class FOtoFSA:
 
         else:
             raise ValueError(f"Unsupported relation: {left} {op} {right}")
-
-    def _relation_eq(self, var1, var2, alphabet):
-        """x = y: both variables refer to the same position"""
-        # The equality relation is satisfied by all strings
-        fsa = FiniteStateAutomaton(1, self.alphabet)
-
-        # For any symbol, stay in the accepting state
-        for symbol in self.alphabet:
-            fsa.set_transition(0, symbol, 0)
-
-        fsa.set_initial_state(0)
-        fsa.set_accepting_state(0)
-        return fsa.trim().minimize()
 
     def _relation_succ(self, var1, var2, alphabet):
         """x = y+1: var1 is immediately after var2"""

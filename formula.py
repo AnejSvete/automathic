@@ -106,7 +106,7 @@ class FOFormula:
 
     def to_fo_less(self):
         """
-        Convert a formula into one that only uses the < relation (canonical form for FO[<]).
+        Convert a formula into one that only uses the < relation and existential quantifiers (canonical form for FO[<]).
         This transforms formulas with <=, >=, >, =, and successor (x = y+1) relations.
         """
         if isinstance(self, Relation):
@@ -115,7 +115,8 @@ class FOFormula:
             # Check if this is a successor relation (x = y+1)
             if op == "=" and right.endswith("+1"):
                 base_var = right[:-2]  # Remove "+1"
-                # x = y+1 means: y < x AND there's no z between them
+                # x = y+1 means: y < x AND NOT EXISTS z: (y < z < x)
+                # Rewrite as: y < x AND EXISTS z: NOT(y < z AND z < x)
                 return Conjunction(
                     Relation(base_var, "<", left),
                     Negation(
@@ -130,7 +131,8 @@ class FOFormula:
             # Check if this is a predecessor relation (y = x+1)
             elif op == "=" and left.endswith("+1"):
                 base_var = left[:-2]  # Remove "+1"
-                # y = x+1 means: x < y AND there's no z between them
+                # y = x+1 means: x < y AND NOT EXISTS z: (x < z < y)
+                # Rewrite as: x < y AND EXISTS z: NOT(x < z AND z < y)
                 return Conjunction(
                     Relation(right, "<", base_var),
                     Negation(
@@ -144,14 +146,23 @@ class FOFormula:
                 )
             # Other relations can be directly converted
             elif op == "<=":
-                # x ≤ y means: x < y OR NOT(y < x)
+                # x ≤ y means: x < y OR x = y
+                # where x = y means NOT(x < y) AND NOT(y < x)
                 return Disjunction(
-                    Relation(left, "<", right), Negation(Relation(right, "<", left))
+                    Relation(left, "<", right),
+                    Conjunction(
+                        Negation(Relation(left, "<", right)),
+                        Negation(Relation(right, "<", left)),
+                    ),
                 )
             elif op == ">=":
-                # x ≥ y means: y < x OR NOT(x < y)
+                # x ≥ y means: y < x OR x = y
                 return Disjunction(
-                    Relation(right, "<", left), Negation(Relation(left, "<", right))
+                    Relation(right, "<", left),
+                    Conjunction(
+                        Negation(Relation(left, "<", right)),
+                        Negation(Relation(right, "<", left)),
+                    ),
                 )
             elif op == ">":
                 # x > y means: y < x
@@ -178,7 +189,10 @@ class FOFormula:
         elif isinstance(self, ExistentialQuantifier):
             return ExistentialQuantifier(self.variable, self.subformula.to_fo_less())
         elif isinstance(self, UniversalQuantifier):
-            return UniversalQuantifier(self.variable, self.subformula.to_fo_less())
+            # Convert universal quantifiers to negated existential quantifiers
+            # ∀x.φ(x) ≡ ¬∃x.¬φ(x)
+            negated_subformula = Negation(self.subformula.to_fo_less())
+            return Negation(ExistentialQuantifier(self.variable, negated_subformula))
         elif isinstance(self, Predicate):
             # Predicates don't contain relations, so they remain unchanged
             return self
@@ -387,11 +401,10 @@ class FOFormula:
         """
         if isinstance(self, UniversalQuantifier):
             # ∀x.φ(x) ≡ ¬∃x.¬φ(x)
-            return Negation(
-                ExistentialQuantifier(
-                    self.variable, Negation(self.subformula)._push_negation_inward()
-                )
-            )  # Remove the _push_negation_inward() call here
+            negated_subformula = Negation(
+                self.subformula._convert_universals_to_existentials()
+            )
+            return Negation(ExistentialQuantifier(self.variable, negated_subformula))
         elif isinstance(self, ExistentialQuantifier):
             return ExistentialQuantifier(
                 self.variable, self.subformula._convert_universals_to_existentials()

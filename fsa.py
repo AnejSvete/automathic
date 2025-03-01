@@ -98,7 +98,7 @@ class FiniteStateAutomaton:
         from_obj = self._get_state_obj(from_state)
         to_obj = self._get_state_obj(to_state)
         self.transitions[(from_obj, symbol)] = to_obj
-        print(f"Transition: {from_obj} --{symbol}--> {to_obj}")
+        # print(f"Transition: {from_obj} --{symbol}--> {to_obj}")
 
     def set_initial_state(self, state):
         """Set the initial state"""
