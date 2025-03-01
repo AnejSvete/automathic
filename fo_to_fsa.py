@@ -124,10 +124,13 @@ class FOtoFSA:
     def _construct_V_structure_fsa(self, V, V_alphabet):
         """Constructs the FSA that checks if a string is a valid V-structure.
 
+        A valid V-structure assigns each variable to exactly one position,
+        with disjoint sets of variables at each position.
+
         Args:
             V: Set of free variables in the formula
         """
-        # Create an FSA with 2^|V| states
+        # Create an FSA with 2^|V| states (each state tracks seen variables)
         fsa = FiniteStateAutomaton(2 ** len(V), V_alphabet)
         P_V = self._powerset(V)
         v2idx = {v: i for i, v in enumerate(P_V)}
@@ -135,21 +138,25 @@ class FOtoFSA:
         # State empty set is initial state
         fsa.set_initial_state(v2idx[()])
 
-        # For every subset of V and every symbol in the subset, only advance
-        # to the next subset if the symbol has not been seen in the string yet
-        for symbol, subset in fsa.alphabet:
-            outgoing_subsets = self._powerset(set(V) - set(subset))
-            for out_subset in outgoing_subsets:
-                next_subset = tuple(sorted(set(subset + out_subset)))
-                fsa.set_transition(
-                    v2idx[subset], (symbol, out_subset), v2idx[next_subset]
-                )
+        # For each state (representing variables we've seen so far)
+        for seen_vars in P_V:
+            seen_vars_set = set(seen_vars)
 
-            fsa.set_transition(v2idx[subset], (symbol, ()), v2idx[subset])
+            # For each possible input symbol
+            for symbol, vars_at_pos in V_alphabet:
+                vars_at_pos_set = set(vars_at_pos)
 
-        # All states are accepting states
-        for state in range(fsa.num_states):
-            fsa.set_accepting_state(state)
+                # Check that vars_at_pos is disjoint from seen_vars (no overlap)
+                if len(seen_vars_set.intersection(vars_at_pos_set)) == 0:
+                    # Calculate new set of seen variables
+                    new_seen_vars = tuple(sorted(seen_vars_set.union(vars_at_pos_set)))
+                    # Add transition
+                    fsa.set_transition(
+                        v2idx[seen_vars], (symbol, vars_at_pos), v2idx[new_seen_vars]
+                    )
+
+        # Only the state where all variables have been seen is accepting
+        fsa.set_accepting_state(v2idx[tuple(sorted(V))])
 
         return fsa.trim().minimize()
 
@@ -164,30 +171,35 @@ class FOtoFSA:
         # Intersect the structure FSA with the FSA
         return V_structure_fsa.intersect(fsa).trim().minimize()
 
-    def _convert(self, formula, V, alphabet):
+    def _convert(self, formula, V, V_alphabet):
+        # V = formula.get_variables()
+        # V = sorted(V)  # Sort the variables for deterministic order
+
+        # V_alphabet = list(product(self.alphabet, self._powerset(V)))
+
         """Internal recursive conversion method"""
         if isinstance(formula, Predicate):
-            return self._convert_predicate(formula, alphabet, V)
+            return self._convert_predicate(formula, V_alphabet, V)
         elif isinstance(formula, Relation):
-            return self._convert_relation(formula, alphabet, V)
+            return self._convert_relation(formula, V_alphabet, V)
         elif isinstance(formula, Negation):
             return self._ensure_V_structure(
-                self._convert(formula.subformula, V, alphabet).complement(), V
+                self._convert(formula.subformula, V, V_alphabet).complement(), V
             )
         elif isinstance(formula, Conjunction):
-            left_fsa = self._convert(formula.left, V, alphabet)
-            right_fsa = self._convert(formula.right, V, alphabet)
+            left_fsa = self._convert(formula.left, V, V_alphabet)
+            right_fsa = self._convert(formula.right, V, V_alphabet)
             intersection_fsa = left_fsa.intersect(right_fsa)
             return self._ensure_V_structure(intersection_fsa, V)
         elif isinstance(formula, ExistentialQuantifier):
             # For existential quantification, we project out the variable
             return self._remove_variable(
-                self._convert(formula.subformula, V, alphabet), V, formula.variable
+                self._convert(formula.subformula, V, V_alphabet), V, formula.variable
             )
         else:
             raise ValueError(f"Unsupported formula type: {type(formula).__name__}")
 
-    def _convert_predicate(self, predicate, alphabet, V):
+    def _convert_predicate(self, predicate, V_alphabet, V):
         """Convert a position predicate to an FSA"""
         # We only support Qa predicates (testing for specific alphabet symbols)
         if isinstance(predicate, SymbolPredicate):
@@ -203,7 +215,7 @@ class FOtoFSA:
             # Create an automaton with 2 states:
             # State 0: Initial state, waiting to see the symbol
             # State 1: Accepting state, saw the symbol
-            fsa = FiniteStateAutomaton(2, alphabet)
+            fsa = FiniteStateAutomaton(2, V_alphabet)
 
             # Set initial state
             fsa.set_initial_state(0)
@@ -229,20 +241,20 @@ class FOtoFSA:
                 f"Unsupported predicate: {predicate.name}. Only Q predicates are supported."
             )
 
-    def _convert_relation(self, relation, alphabet, V):
+    def _convert_relation(self, relation, V_alphabet, V):
         """Convert a numerical relation to an FSA following Straubing's construction"""
         left, op, right = relation.left, relation.operator, relation.right
 
         # Less than: x < y
         if op == "<":
-            return self._relation_lt(left, right, alphabet, V)
+            return self._relation_lt(left, right, V_alphabet, V)
 
         else:
             raise ValueError(f"Unsupported relation: {left} {op} {right}")
 
-    def _relation_lt(self, var1, var2, alphabet, V):
+    def _relation_lt(self, var1, var2, V_alphabet, V):
         """x < y: var1 position is strictly less than var2 position"""
-        fsa = FiniteStateAutomaton(3, alphabet)
+        fsa = FiniteStateAutomaton(3, V_alphabet)
 
         # State 0: Initial state, haven't seen either position
         # State 1: Seen position var1, waiting for var2

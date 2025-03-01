@@ -73,6 +73,18 @@ class FOFormula:
         # If all variables are bound, then there are no free variables
         return all_variables.issubset(bound_variables)
 
+    def get_free_variables(self):
+        """
+        Extract all free variables used in the formula. Free variables are variables
+        that are not bound by any quantifiers.
+
+        Returns:
+            set: A set of free variable names used in the formula
+        """
+        all_variables = self.get_variables()
+        bound_variables = self._get_bound_variables()
+        return all_variables - bound_variables
+
     def _get_bound_variables(self):
         """
         Helper method to get all variables that are bound by quantifiers.
