@@ -185,7 +185,11 @@ class FOFormula:
         elif isinstance(self, Conjunction):
             return Conjunction(self.left.to_fo_less(), self.right.to_fo_less())
         elif isinstance(self, Disjunction):
-            return Disjunction(self.left.to_fo_less(), self.right.to_fo_less())
+            return Negation(
+                Conjunction(
+                    Negation(self.left.to_fo_less()), Negation(self.right.to_fo_less())
+                )
+            )
         elif isinstance(self, ExistentialQuantifier):
             return ExistentialQuantifier(self.variable, self.subformula.to_fo_less())
         elif isinstance(self, UniversalQuantifier):
@@ -198,6 +202,132 @@ class FOFormula:
             return self
         else:
             raise ValueError(f"Unsupported formula type: {type(self).__name__}")
+
+    def is_fo_less(self):
+        """
+        Checks whether the formula belongs to FO[<], the first-order logic fragment
+        that only allows:
+        - Existential quantifiers (∃)
+        - Conjunctions (∧)
+        - Negations (¬)
+        - Less-than relations (<)
+
+        Returns:
+            bool: True if the formula is in FO[<], False otherwise
+        """
+        if isinstance(self, Predicate):
+            # Only SymbolPredicates like Qa(x) are allowed in FO[<]
+            return isinstance(self, SymbolPredicate)
+
+        elif isinstance(self, Relation):
+            # Only < relations are allowed
+            return self.operator == "<"
+
+        elif isinstance(self, Negation):
+            # Negations are allowed if the subformula is in FO[<]
+            return self.subformula.is_fo_less()
+
+        elif isinstance(self, Conjunction):
+            # Conjunctions are allowed if both sides are in FO[<]
+            return self.left.is_fo_less() and self.right.is_fo_less()
+
+        elif isinstance(self, ExistentialQuantifier):
+            # Existential quantifiers are allowed if the subformula is in FO[<]
+            return self.subformula.is_fo_less()
+
+        elif isinstance(self, Disjunction):
+            # Disjunctions are not directly in FO[<], but could be expressed
+            # using De Morgan's law as ¬(¬A ∧ ¬B)
+            # However, for direct syntax checking, return False
+            return False
+
+        elif isinstance(self, UniversalQuantifier):
+            # Universal quantifiers are not directly in FO[<]
+            return False
+
+        else:
+            # Unknown formula type
+            return False
+
+    def simplify(self):
+        """
+        Simplifies a formula in FO[<] by applying basic logical transformations
+        while maintaining the FO[<] syntax restrictions (existential quantifiers,
+        conjunctions, negations, and less-than relations).
+
+        This includes:
+        - Eliminating double negations
+        - Simplifying Boolean tautologies and contradictions
+        - Simplifying redundant conjunctions
+
+        Returns:
+            FOFormula: A simplified equivalent formula
+        """
+        if isinstance(self, Predicate) or isinstance(self, Relation):
+            # Atomic formulas remain unchanged
+            return self
+
+        elif isinstance(self, Negation):
+            # First simplify the subformula
+            simplified_subformula = self.subformula.simplify()
+
+            # Eliminate double negation: ¬¬φ ≡ φ
+            if isinstance(simplified_subformula, Negation):
+                return simplified_subformula.subformula
+
+            # Apply negation to the simplified subformula
+            return Negation(simplified_subformula)
+
+        elif isinstance(self, Conjunction):
+            # Simplify both sides
+            left_simplified = self.left.simplify()
+            right_simplified = self.right.simplify()
+
+            # Check if either side is a contradiction, which makes the whole conjunction false
+            # Note: We would need a representation for False, which isn't defined yet
+
+            # Eliminate redundant conjunctions: A ∧ A ≡ A
+            if left_simplified.to_string() == right_simplified.to_string():
+                return left_simplified
+
+            # Otherwise, keep the simplified conjunction
+            return Conjunction(left_simplified, right_simplified)
+
+        elif isinstance(self, Disjunction):
+            # In FO[<], disjunction is represented as ¬(¬A ∧ ¬B)
+            # Simplify both sides first
+            left_simplified = self.left.simplify()
+            right_simplified = self.right.simplify()
+
+            # Convert disjunction to the FO[<] form and simplify again
+            return Negation(
+                Conjunction(Negation(left_simplified), Negation(right_simplified))
+            ).simplify()
+
+        elif isinstance(self, ExistentialQuantifier):
+            # Simplify the subformula
+            simplified_subformula = self.subformula.simplify()
+
+            # Check if the variable is actually used in the subformula
+            if self.variable not in simplified_subformula.get_variables():
+                # If the variable isn't used, we can remove the quantifier
+                return simplified_subformula
+
+            return ExistentialQuantifier(self.variable, simplified_subformula)
+
+        elif isinstance(self, UniversalQuantifier):
+            # In FO[<], universal quantifiers are represented as ¬∃x.¬φ
+            # First simplify the subformula
+            simplified_subformula = self.subformula.simplify()
+
+            # Convert to FO[<] form and simplify again
+            negated_subformula = Negation(simplified_subformula)
+            existential = ExistentialQuantifier(self.variable, negated_subformula)
+            return Negation(existential).simplify()
+
+        else:
+            # For any unsupported formula type, return as is
+            return self
 
     def to_enf(self):
         """
@@ -453,7 +583,7 @@ class FOFormula:
     def get_alphabet(self):
         """
         Extract all symbols used in the formula's predicates.
-        Specifically looks for predicates with names starting with 'Q_'.
+        Specifically looks for predicates with names starting with 'Q'.
 
         Returns:
             list: A list of symbols in the alphabet used in the formula

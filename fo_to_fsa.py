@@ -22,7 +22,7 @@ class FOtoFSA:
     - Positions (first-order variables)
     - Labels (predicates on positions)
 
-    And works with arbitrary alphabets using Q_a predicates.
+    And works with arbitrary alphabets using Qa predicates.
     """
 
     def __init__(self, alphabet=None):
@@ -73,6 +73,8 @@ class FOtoFSA:
         Returns:
             A FiniteStateAutomaton equivalent to the formula
         """
+        formula = formula.to_fo_less()
+
         V = formula.get_variables()
         V = sorted(V)  # Sort the variables for deterministic order
 
@@ -175,35 +177,22 @@ class FOtoFSA:
         elif isinstance(formula, Conjunction):
             left_fsa = self._convert(formula.left, V, alphabet)
             right_fsa = self._convert(formula.right, V, alphabet)
-            union_fsa = left_fsa.union(right_fsa)
-            return self._ensure_V_structure(union_fsa, V)
-        elif isinstance(formula, Disjunction):
-            return self._ensure_V_structure(
-                self._convert(formula.left, V, alphabet).union(
-                    self._convert(formula.right, V, alphabet)
-                ),
-                V,
-            )
+            intersection_fsa = left_fsa.intersect(right_fsa)
+            return self._ensure_V_structure(intersection_fsa, V)
         elif isinstance(formula, ExistentialQuantifier):
             # For existential quantification, we project out the variable
             return self._remove_variable(
                 self._convert(formula.subformula, V, alphabet), V, formula.variable
             )
-        elif isinstance(formula, UniversalQuantifier):
-            # For universal quantification, we use the equivalence: ∀x.φ(x) ≡ ¬∃x.¬φ(x)
-            negated_sub = Negation(formula.subformula)
-            existential = ExistentialQuantifier(formula.variable, negated_sub)
-            negated_existential = Negation(existential)
-            return self._convert(negated_existential, V, alphabet)
         else:
             raise ValueError(f"Unsupported formula type: {type(formula).__name__}")
 
     def _convert_predicate(self, predicate, alphabet, V):
         """Convert a position predicate to an FSA"""
-        # We only support Q_a predicates (testing for specific alphabet symbols)
+        # We only support Qa predicates (testing for specific alphabet symbols)
         if isinstance(predicate, SymbolPredicate):
-            symbol = predicate.symbol  # Extract the symbol (e.g., "a" from "Q_a")
-            variable = predicate.variable  # Extract the variable (e.g., "x" from "Q_a")
+            symbol = predicate.symbol  # Extract the symbol (e.g., "a" from "Qa")
+            variable = predicate.variable  # Extract the variable (e.g., "x" from "Qa")
 
             # Check if the symbol is in our alphabet
             if symbol not in self.alphabet:
@@ -244,31 +233,9 @@ class FOtoFSA:
         """Convert a numerical relation to an FSA following Straubing's construction"""
         left, op, right = relation.left, relation.operator, relation.right
 
-        # Equality: x = y
-        if op == "=":
-            raise ValueError("Equality relations are not supported")
-
         # Less than: x < y
-        elif op == "<":
+        if op == "<":
             return self._relation_lt(left, right, alphabet, V)
-
-        # Greater than: x > y (rewritten as y < x)
-        elif op == ">":
-            return self._relation_lt(right, left, alphabet, V)
-
-        # Less than or equal: x ≤ y (rewritten as ¬(y < x))
-        elif op == "<=":
-            return self._ensure_V_structure(
-                self._relation_lt(right, left, alphabet, V).complement(),
-                V,
-            )
-
-        # Greater than or equal: x ≥ y (rewritten as ¬(x < y))
-        elif op == ">=":
-            return self._ensure_V_structure(
-                self._relation_lt(left, right, alphabet, V).complement(),
-                V,
-            )
 
         else:
             raise ValueError(f"Unsupported relation: {left} {op} {right}")
@@ -376,53 +343,8 @@ class FOtoFSA:
             result.set_transition(unseen_src_id, new_symbol, unseen_dst_id)
             result.set_transition(seen_src_id, new_symbol, seen_dst_id)
 
-            # Add non-deterministic transitions
             if var_present:
-                # When variable is present, also add non-deterministic transition to allow
-                # other possible destinations for the same source and symbol
-                for (other_src, other_symbol), other_dst in fsa.transitions.items():
-                    if other_src.id == src_state.id and other_symbol[0] == symbol:
-                        # Skip the exact same transition
-                        if (
-                            other_dst.id == dst_state.id
-                            and other_symbol[1] == vars_at_pos
-                        ):
-                            continue
-
-                        # Create the new symbol without the variable
-                        other_new_vars = tuple(
-                            sorted([v for v in other_symbol[1] if v != variable])
-                        )
-                        other_new_symbol = (other_symbol[0], other_new_vars)
-
-                        # If this is the same symbol we're currently processing
-                        if other_new_symbol == new_symbol:
-                            # Determine if this other transition involves the variable
-                            other_var_present = variable in other_symbol[1]
-
-                            # Determine destination state ID
-                            if other_var_present:
-                                other_unseen_dst_id = p2idx[
-                                    (other_dst.id, 1)
-                                ]  # unseen -> seen
-                                other_seen_dst_id = p2idx[
-                                    (other_dst.id, 1)
-                                ]  # seen -> seen
-                            else:
-                                other_unseen_dst_id = p2idx[
-                                    (other_dst.id, 0)
-                                ]  # unseen -> unseen
-                                other_seen_dst_id = p2idx[
-                                    (other_dst.id, 1)
-                                ]  # seen -> seen
-
-                            # Add non-deterministic transitions
-                            result.set_transition(
-                                unseen_src_id, new_symbol, other_unseen_dst_id
-                            )
-                            result.set_transition(
-                                seen_src_id, new_symbol, other_seen_dst_id
-                            )
+                result.set_transition(unseen_src_id, new_symbol, seen_dst_id)
 
         # Set accepting states - a state is accepting if it corresponds to an accepting
         # state in the original FSA and the variable has been seen
