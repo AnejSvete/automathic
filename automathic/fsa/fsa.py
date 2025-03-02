@@ -1,112 +1,35 @@
 from collections import defaultdict
 
+from automathic.fsa.nfa import NonDeterministicFSA, State
 
-class State:
+
+class FiniteStateAutomaton(NonDeterministicFSA):
     """
-    Represents a state in a finite state automaton
+    Deterministic Finite State Automaton implementation.
+    Extends NonDeterministicFSA but enforces the deterministic constraint
+    of having at most one transition for each state-symbol pair.
     """
 
-    def __init__(self, id, origin=None, label=None):
-        """
-        Initialize a state
-
-        Args:
-            id: Numeric ID for the state
-            origin: Tuple representing the history/origin of the state
-            label: Optional label for the state (defaults to str(id))
-        """
-        self.id = id
-        # Initialize origin as a tuple containing just this state's ID if not provided
-        self.origin = origin if origin is not None else (id,)
-        # Use the label if provided, otherwise use the origin tuple representation
-        self.label = label if label is not None else str(self.origin)
-
-    def __eq__(self, other):
-        if isinstance(other, State):
-            return self.id == other.id
-        elif isinstance(other, int):
-            return self.id == other
-        return False
-
-    def __hash__(self):
-        return hash(self.id)
-
-    def __repr__(self):
-        return f"State({self.id}, origin={self.origin}, '{self.label}')"
-
-    def __str__(self):
-        return self.label
-
-
-class FiniteStateAutomaton:
     def __init__(self, num_states, alphabet):
-        """
-        Initialize a finite state automaton
-
-        Args:
-            num_states: Number of states in the automaton
-            alphabet: List of symbols in the alphabet or the size of the alphabet
-        """
-        # Handle both alphabet list and alphabet size
-        if isinstance(alphabet, list):
-            self.alphabet = alphabet
-            self.alphabet_size = len(alphabet)
-        else:
-            # For backward compatibility, if an integer is passed
-            self.alphabet_size = alphabet
-            self.alphabet = list(range(alphabet))
-
-        self.num_symbols = len(self.alphabet)
-
-        # Create state objects with origin tracking
-        self.states = [State(i) for i in range(num_states)]
-        self.num_states = num_states
-
-        # Initialize transitions dictionary: {(state, symbol): next_state}
+        """Initialize a deterministic FSA with a given number of states and alphabet."""
+        super().__init__(num_states, alphabet)
+        # Redefine transitions as a dictionary mapping (state, symbol) to a single state
+        # We'll keep the same structure but enforce single destinations
         self.transitions = {}
-        self.initial_state = None  # Single initial state
-        self.accepting_states = set()
 
-        # For visualization
-        self.theme = "dark"  # Default theme
-
-    def _get_state_obj(self, state_id):
-        """Convert state ID to state object if needed"""
-        if isinstance(state_id, State):
-            return state_id
-        elif isinstance(state_id, int) and 0 <= state_id < self.num_states:
-            return self.states[state_id]
-        else:
-            raise ValueError(f"Invalid state: {state_id}")
-
-    def set_state_label(self, state_id, label):
-        """Set a human-readable label for a state"""
-        state = self._get_state_obj(state_id)
-        state.label = label
-
-    def set_transition(self, from_state, symbol, to_state):
+    def set_transition(self, src_id, symbol, dst_id):
         """
-        Set a transition from one state to another on a given symbol
-
-        Args:
-            from_state: Source state (int or State)
-            symbol: Transition symbol (string or integer)
-            to_state: Destination state (int or State)
+        Set a transition in the DFA. Each (state, symbol) pair can only
+        transition to a single destination state.
         """
-        from_obj = self._get_state_obj(from_state)
-        to_obj = self._get_state_obj(to_state)
-        self.transitions[(from_obj, symbol)] = to_obj
-        # print(f"Transition: {from_obj} --{symbol}--> {to_obj}")
+        if src_id >= len(self.states) or dst_id >= len(self.states):
+            raise ValueError("State index out of bounds")
 
-    def set_initial_state(self, state):
-        """Set the initial state"""
-        state_obj = self._get_state_obj(state)
-        self.initial_state = state_obj
+        src_state = self.states[src_id]
+        dst_state = self.states[dst_id]
 
-    def set_accepting_state(self, state):
-        """Set a state as an accepting state"""
-        state_obj = self._get_state_obj(state)
-        self.accepting_states.add(state_obj)
+        # For a DFA, overwrite any existing transition for this state-symbol pair
+        self.transitions[(src_state, symbol)] = dst_state
 
     def transition(self, state, symbol):
         """Get the next state for a given state and symbol"""
@@ -114,7 +37,7 @@ class FiniteStateAutomaton:
         return self.transitions.get((state_obj, symbol), None)
 
     def accepts(self, input_string):
-        """Check if the FSA accepts the given input string"""
+        """Check if the DFA accepts the given input string"""
         if self.initial_state is None:
             return False
 
@@ -126,13 +49,7 @@ class FiniteStateAutomaton:
         return state in self.accepting_states
 
     def minimize(self):
-        """
-        Create a new minimized FSA using Hopcroft's algorithm.
-        States are labeled with tuples containing the original state origins.
-
-        Returns:
-            FiniteStateAutomaton: A minimized version of this FSA
-        """
+        """Create a new minimized FSA using Hopcroft's algorithm."""
         # Start with the partition [accepting states, non-accepting states]
         partition = [
             self.accepting_states,
@@ -183,10 +100,6 @@ class FiniteStateAutomaton:
         state_map = {}
         for i, group in enumerate(partition):
             # Combine the origins of all states in the group
-            # Convert all origin elements to strings before sorting to avoid type comparison issues
-            # combined_origin = tuple(
-            #     sorted(str(origin) for state in group for origin in state.origin)
-            # )
             combined_origin = tuple(
                 str(origin) for state in group for origin in state.origin
             )
@@ -218,145 +131,36 @@ class FiniteStateAutomaton:
 
         return result
 
-    def get_transitions(self, q):
-        """Yield transitions from state q"""
-        state_obj = self._get_state_obj(q)
-        for (src, symbol), dst in self.transitions.items():
-            if src == state_obj:
-                yield symbol, dst
-
-    def intersect(self, other):
+    def is_complete(self):
         """
-        Create an FSA that accepts the intersection of languages accepted by self and other.
-        Uses the standard product construction and tracks origin of states.
+        Check if the DFA is complete (has transitions for all symbols from all states)
         """
-        # Check if either automaton has no initial state
-        if self.initial_state is None or other.initial_state is None:
-            # Return an empty automaton
-            return FiniteStateAutomaton(0, self.alphabet)
-
-        # Create a new FSA with states being the product of the two input FSAs
-        num_states = self.num_states * other.num_states
-        result = FiniteStateAutomaton(num_states, self.alphabet)
-
-        # Create a mapping from pairs of states to the new state IDs
-        state_map = {}
-        counter = 0
-        for s1 in range(self.num_states):
-            for s2 in range(other.num_states):
-                state_map[(s1, s2)] = counter
-
-                # Get the original states
-                state1 = self.states[s1]
-                state2 = other.states[s2]
-
-                # Combine their origins - convert all to strings for consistency
-                combined_origin = tuple(str(o) for o in state1.origin + state2.origin)
-
-                # Set the state with the combined origin
-                result.states[counter] = State(counter, origin=combined_origin)
-
-                counter += 1
-
-        # Set transitions
-        for (s1, s2), q in state_map.items():
+        for state_id in range(self.num_states):
+            state = self.states[state_id]
+            if state is None:
+                continue
             for symbol in self.alphabet:
-                next_s1 = self.transition(s1, symbol)
-                next_s2 = other.transition(s2, symbol)
-
-                if next_s1 is not None and next_s2 is not None:
-                    next_q = state_map[(next_s1.id, next_s2.id)]
-                    result.set_transition(q, symbol, next_q)
-
-        # Set initial state
-        result.set_initial_state(
-            state_map[(self.initial_state.id, other.initial_state.id)]
-        )
-
-        # Set accepting states
-        for (s1, s2), q in state_map.items():
-            state1 = self.states[s1]
-            state2 = other.states[s2]
-            if state1 in self.accepting_states and state2 in other.accepting_states:
-                result.set_accepting_state(q)
-
-        return result
-
-    def union(self, other):
-        """
-        Create an FSA that accepts the union of languages accepted by self and other.
-        Uses the standard product construction and tracks origin of states.
-        """
-        # Check if either automaton has no initial state
-        if self.initial_state is None and other.initial_state is None:
-            # Return an empty automaton
-            return FiniteStateAutomaton(0, self.alphabet)
-        elif self.initial_state is None:
-            return other.copy()
-        elif other.initial_state is None:
-            return self.copy()
-
-        # Create a new FSA with states being the product of the two input FSAs
-        num_states = self.num_states * other.num_states
-        result = FiniteStateAutomaton(num_states, self.alphabet)
-
-        # Create a mapping from pairs of states to the new state IDs
-        state_map = {}
-        counter = 0
-        for s1 in range(self.num_states):
-            for s2 in range(other.num_states):
-                state_map[(s1, s2)] = counter
-
-                # Get the original states
-                state1 = self.states[s1]
-                state2 = other.states[s2]
-
-                # Combine their origins - convert all to strings for consistency
-                combined_origin = tuple(str(o) for o in state1.origin + state2.origin)
-
-                # Set the state with the combined origin
-                result.states[counter] = State(counter, origin=combined_origin)
-
-                counter += 1
-
-        # Set transitions
-        for (s1, s2), q in state_map.items():
-            for symbol in self.alphabet:
-                next_s1 = self.transition(s1, symbol)
-                next_s2 = other.transition(s2, symbol)
-
-                if next_s1 is not None and next_s2 is not None:
-                    next_q = state_map[(next_s1.id, next_s2.id)]
-                    result.set_transition(q, symbol, next_q)
-
-        # Set initial state
-        result.set_initial_state(
-            state_map[(self.initial_state.id, other.initial_state.id)]
-        )
-
-        # Set accepting states - for union, a state is accepting if either component is accepting
-        for (s1, s2), q in state_map.items():
-            state1 = self.states[s1]
-            state2 = other.states[s2]
-            if state1 in self.accepting_states or state2 in other.accepting_states:
-                result.set_accepting_state(q)
-
-        return result
+                if self.transition(state_id, symbol) is None:
+                    return False
+        return True
 
     def is_complete(self):
         """
-        Check if the FSA is complete (has transitions for all symbols from all states)
+        Check if the DFA is complete (has transitions for all symbols from all states)
         """
-        for state in self.states:
+        for state_id in range(self.num_states):
+            state = self.states[state_id]
+            if state is None:
+                continue
             for symbol in self.alphabet:
-                if self.transition(state, symbol) is None:
+                if self.transition(state_id, symbol) is None:
                     return False
         return True
 
     def complete(self):
         """
-        Make the FSA complete by adding a sink state if needed.
-        Returns a new complete FSA.
+        Make the DFA complete by adding a sink state if needed.
+        Returns a new complete DFA.
         """
         if self.is_complete():
             return self.copy()
@@ -366,13 +170,14 @@ class FiniteStateAutomaton:
         sink_state = self.num_states  # The new sink state
 
         # Copy all existing transitions
-        for state in range(self.num_states):
+        for state_id in range(self.num_states):
             for symbol in self.alphabet:
-                next_state = self.transition(state, symbol)
+                next_state = self.transition(state_id, symbol)
                 if next_state is not None:
-                    result.set_transition(state, symbol, next_state)
+                    # Use state ID consistently
+                    result.set_transition(state_id, symbol, next_state.id)
                 else:
-                    result.set_transition(state, symbol, sink_state)
+                    result.set_transition(state_id, symbol, sink_state)
 
         # Add transitions from sink state to itself
         for symbol in self.alphabet:
@@ -390,34 +195,32 @@ class FiniteStateAutomaton:
 
     def complement(self):
         """
-        Create an FSA that accepts exactly the strings rejected by self.
-        Ensures the FSA is complete first.
+        Create a DFA that accepts exactly the strings rejected by self.
+        Ensures the DFA is complete first.
         """
-        # Make sure the FSA is complete
-        complete_fsa = self.complete()
+        # Make sure the DFA is complete
+        complete_dfa = self.complete()
 
-        # Create a new FSA with the same structure but complemented accepting states
-        result = FiniteStateAutomaton(complete_fsa.num_states, complete_fsa.alphabet)
+        # Create a new DFA with the same structure but complemented accepting states
+        result = FiniteStateAutomaton(complete_dfa.num_states, complete_dfa.alphabet)
 
         # Copy all transitions
-        for (src, symbol), dst in complete_fsa.transitions.items():
+        for (src, symbol), dst in complete_dfa.transitions.items():
             result.set_transition(src.id, symbol, dst.id)
 
         # Copy initial state
-        if complete_fsa.initial_state is not None:
-            result.set_initial_state(complete_fsa.initial_state.id)
+        if complete_dfa.initial_state is not None:
+            result.set_initial_state(complete_dfa.initial_state.id)
 
         # Complement accepting states
-        for state in complete_fsa.states:
-            if state not in complete_fsa.accepting_states:
+        for state in complete_dfa.states:
+            if state not in complete_dfa.accepting_states:
                 result.set_accepting_state(state.id)
 
         return result
 
     def copy(self):
-        """
-        Create a deep copy of this FSA
-        """
+        """Create a deep copy of this DFA"""
         result = FiniteStateAutomaton(self.num_states, self.alphabet)
 
         # Copy transitions
@@ -433,460 +236,3 @@ class FiniteStateAutomaton:
             result.set_accepting_state(state.id)
 
         return result
-
-    def trim(self):
-        """
-        Create a new FSA with all unreachable and dead-end states removed,
-        while preserving state origins.
-
-        Returns:
-            A new FSA with only useful states
-        """
-        # Find all reachable states from initial state
-        reachable = set()
-        if self.initial_state is not None:
-            queue = [self.initial_state]
-            while queue:
-                state = queue.pop(0)
-                if state not in reachable:
-                    reachable.add(state)
-                    for symbol in self.alphabet:
-                        next_state = self.transition(state, symbol)
-                        if next_state is not None and next_state not in reachable:
-                            queue.append(next_state)
-
-        # Find all states that can reach an accepting state
-        # First, build a reverse transition map
-        reverse_transitions = defaultdict(list)
-        for (src, symbol), dst in self.transitions.items():
-            reverse_transitions[dst].append((src, symbol))
-
-        # Do a reverse search from accepting states
-        can_reach_accepting = set()
-        queue = list(self.accepting_states)
-        while queue:
-            state = queue.pop(0)
-            if state not in can_reach_accepting:
-                can_reach_accepting.add(state)
-                for prev_state, _ in reverse_transitions[state]:
-                    if prev_state not in can_reach_accepting:
-                        queue.append(prev_state)
-
-        # Keep only states that are both reachable and can reach an accepting state
-        useful_states = reachable.intersection(can_reach_accepting)
-
-        # If no useful states remain, return an empty automaton
-        if not useful_states:
-            return FiniteStateAutomaton(0, self.alphabet)
-
-        # Create a new FSA with only useful states (use consecutive IDs)
-        result = FiniteStateAutomaton(len(useful_states), self.alphabet)
-
-        # Create a mapping from old states to new state IDs
-        old_to_new_id = {}
-        for new_id, old_state in enumerate(sorted(useful_states, key=lambda s: s.id)):
-            old_to_new_id[old_state] = new_id
-            # Create a new state with the same origin
-            result.states[new_id] = State(new_id, origin=old_state.origin)
-
-        # Copy transitions
-        for (src, symbol), dst in self.transitions.items():
-            if src in useful_states and dst in useful_states:
-                result.set_transition(old_to_new_id[src], symbol, old_to_new_id[dst])
-
-        # Copy initial state if it's useful
-        if self.initial_state in useful_states:
-            result.set_initial_state(old_to_new_id[self.initial_state])
-
-        # Copy accepting states
-        for state in self.accepting_states:
-            if state in useful_states:
-                result.set_accepting_state(old_to_new_id[state])
-
-        return result
-
-    def reindex(self):
-        """
-        Reindex the states of the FSA to be consecutive integers starting from 0.
-        This creates a new FSA where states have simple numeric IDs (0, 1, 2, ...).
-        The method resets the state labels to match their new IDs.
-
-        Useful after trim() or other operations that might leave gaps in state IDs.
-
-        Returns:
-            A new FSA with reindexed states and simple numeric labels
-        """
-        # If automaton is empty, return an empty automaton
-        if self.num_states == 0:
-            return self.copy()
-
-        # Count actual states (some might be None after trimming)
-        actual_states = [s for s in self.states if s is not None]
-        if not actual_states:
-            return FiniteStateAutomaton(0, self.alphabet)
-
-        # Create a new FSA with the correct number of actual used states
-        result = FiniteStateAutomaton(len(actual_states), self.alphabet)
-
-        # Create a mapping from old state IDs to new consecutive IDs
-        old_to_new = {}
-        for new_id, old_state in enumerate(sorted(actual_states, key=lambda s: s.id)):
-            old_to_new[old_state.id] = new_id
-            # Set the label to match the new ID instead of preserving old label
-            result.set_state_label(new_id, str(new_id))
-
-        # Copy transitions with new state IDs
-        for (src, symbol), dst in self.transitions.items():
-            if src.id in old_to_new and dst.id in old_to_new:
-                result.set_transition(old_to_new[src.id], symbol, old_to_new[dst.id])
-
-        # Set initial state if it exists
-        if self.initial_state is not None and self.initial_state.id in old_to_new:
-            result.set_initial_state(old_to_new[self.initial_state.id])
-
-        # Copy accepting states
-        for state in self.accepting_states:
-            if state.id in old_to_new:
-                result.set_accepting_state(old_to_new[state.id])
-
-        return result
-
-    def __str__(self):
-        return self.ascii()
-
-    def ascii(self):
-        """
-        Generate a text-based visualization of the FSA.
-        """
-        lines = []
-
-        # Title
-        if self.num_states == 0:
-            lines.append("Empty FSA")
-            return "\n".join(lines)
-
-        lines.append(f"FSA with {self.num_states} states")
-
-        # States
-        lines.append("\nSTATES:")
-        for q in range(self.num_states):
-            state = self.states[q]
-            if state is None:
-                continue
-
-            state_desc = f"{q}: {state.label}"
-            if state == self.initial_state:
-                state_desc += " (initial)"
-            if state in self.accepting_states:
-                state_desc += " (accepting)"
-            lines.append(state_desc)
-
-        # Transition table
-        lines.append("\nTRANSITION TABLE:")
-
-        # Handle tuple symbols in the alphabet by converting them to strings
-        # symbol_strs = [str(sym) for sym in self.alphabet]
-        # max_sym_len = max(len(s) for s in symbol_strs) if symbol_strs else 5
-        max_sym_len = 25
-        format_str = f" {{:^{max_sym_len}}} |"
-
-        # Create header with properly formatted symbol strings
-        header = "State                      |" + "".join(
-            format_str.format(str(sym)) for sym in self.alphabet
-        )
-        lines.append(header)
-        lines.append("-" * len(header))
-
-        # Add transitions
-        for q in range(self.num_states):
-            state = self.states[q]
-            if state is None:
-                continue
-
-            # Prefix for state (marking initial/accepting)
-            prefix = ""
-            if state == self.initial_state:
-                prefix += ">"
-            if state in self.accepting_states:
-                prefix += "*"
-            if state != self.initial_state and state not in self.accepting_states:
-                prefix += " "
-
-            row = f"{prefix}{state.label:3} |"
-
-            # Add each transition
-            for symbol in self.alphabet:
-                next_state = self.transition(state, symbol)
-                if next_state is not None:
-                    cell = f" {next_state.label:^{max_sym_len}} |"
-                else:
-                    cell = f" {'-':^{max_sym_len}} |"
-                row += cell
-
-            lines.append(row)
-
-        return "\n".join(lines)
-
-    def _repr_html_(self):
-        """
-        When returned from a Jupyter cell, this will generate the FSA visualization
-        with distinct colors and thicker borders for accepting states
-        """
-        import json
-        from collections import defaultdict
-        from uuid import uuid4
-
-        ret = []
-        if self.num_states == 0:
-            return "<code>Empty FSA</code>"
-
-        if self.num_states > 64:
-            return (
-                "FSA too large to draw graphic, use fsa.ascii()<br />"
-                + f"<code>FSA(states={self.num_states})</code>"
-            )
-
-        # Define color schemes based on theme
-        if hasattr(self, "theme") and self.theme == "dark":
-            colors = {
-                "normal": "4c566a",  # Dark blue-gray
-                "initial": "88c0d0",  # Bright blue
-                "accepting": "bf616a",  # Soft red
-                "initial_accepting": "ebcb8b",  # Gold
-            }
-            stroke_color = "rgb(192, 192, 192)"  # Light gray for dark theme
-            text_color = "#ffffff"  # White text for dark theme
-        else:
-            colors = {
-                "normal": "e9f0f7",  # Light blue
-                "initial": "9fd3c7",  # Teal green
-                "accepting": "ffcab0",  # Soft coral
-                "initial_accepting": "ecdfc8",  # Beige
-            }
-            stroke_color = "#333"  # Dark gray for light theme
-            text_color = "#000000"  # Black text for light theme
-
-        # Add all states with explicit labels
-        for q in self.states:
-            if q is None:
-                continue
-
-            # Explicitly convert the label to string
-            node_label = str(q.label).replace('"', '\\"').replace("'", "")
-
-            # Determine node style - use stroke-width for accepting states
-            if q == self.initial_state and q in self.accepting_states:
-                color = colors["initial_accepting"]
-                border = 3  # Thicker border for accepting states
-            elif q == self.initial_state:
-                color = colors["initial"]
-                border = 1  # Normal border
-            elif q in self.accepting_states:
-                color = colors["accepting"]
-                border = 3  # Thicker border for accepting states
-            else:
-                color = colors["normal"]
-                border = 1  # Normal border
-
-            # Create node with proper styling
-            ret.append(
-                f'g.setNode("{q.id}", {{ '
-                f'label: "{node_label}", '
-                f'shape: "circle", '
-                f'style: "fill: #{color}; stroke: {stroke_color}; stroke-width: {border}px;" '
-                f"}});\n"
-            )
-
-        # Add edges for transitions
-        for q in self.states:
-            if q is None:
-                continue
-
-            to = defaultdict(list)
-            for symbol, next_state in self.get_transitions(q):
-                to[next_state].append(str(symbol))
-
-            for d, values in to.items():
-                if len(values) > 6:
-                    values = values[0:3] + [". . ."]
-                edge_label = ", ".join(values)
-                ret.append(
-                    f'g.setEdge("{q.id}", "{d.id}", {{ '
-                    f'label: "{edge_label}", '  # Use simple quotes
-                    f'arrowhead: "vee", '
-                    f'style: "stroke: {stroke_color}; fill: none;", '
-                    f'labelStyle: "fill: {stroke_color};", '
-                    f'arrowheadStyle: "fill: {stroke_color}; stroke: {stroke_color};" '
-                    f"}});\n"
-                )
-
-        # Add a special invisible node and edge for initial state marker
-        if self.initial_state is not None:
-            ini_id = self.initial_state.id
-            ret.append(
-                f'g.setNode("start", {{ '
-                f'label: "", '
-                f"width: 0, "
-                f"height: 0, "
-                f'style: "opacity: 0" '
-                f"}});\n"
-            )
-            ret.append(
-                f'g.setEdge("start", "{ini_id}", {{ '
-                f'label: "", '
-                f'arrowhead: "normal", '
-                f'style: "stroke: {stroke_color}; fill: none;", '
-                f'arrowheadStyle: "fill: {stroke_color}; stroke: {stroke_color};" '
-                f"}});\n"
-            )
-
-        # If the machine is too big, don't attempt to display it
-        if len(ret) > 256:
-            return (
-                "FSA too large to draw graphic, use fsa.ascii()<br />"
-                + f"<code>FSA(states={self.num_states})</code>"
-            )
-
-        # Build the HTML with embedded JavaScript
-        ret2 = [
-            """
-        <script>
-        try {
-            require.config({
-                paths: {
-                    "d3": "https://cdnjs.cloudflare.com/ajax/libs/d3/4.13.0/d3",
-                    "dagreD3": "https://cdnjs.cloudflare.com/ajax/libs/dagre-d3/0.6.1/dagre-d3.min"
-                }
-            });
-        } catch (e) {
-            ["https://cdnjs.cloudflare.com/ajax/libs/d3/4.13.0/d3.js",
-            "https://cdnjs.cloudflare.com/ajax/libs/dagre-d3/0.6.1/dagre-d3.min.js"].forEach(
-                function (src) {
-                    var tag = document.createElement('script');
-                    tag.src = src;
-                    document.body.appendChild(tag);
-                }
-            );
-        }
-        try {
-            requirejs(['d3', 'dagreD3'], function() {});
-        } catch (e) {}
-        try {
-            require(['d3', 'dagreD3'], function() {});
-        } catch (e) {}
-        </script>
-        """
-        ]
-
-        # Add theme-specific styles
-        ret2.append(
-            f"""
-        <style>
-        /* Import LaTeX-like font */
-        @import url('https://fonts.googleapis.com/css2?family=Source+Serif+Pro:wght@400;600&display=swap');
-        
-        .node rect,
-        .node circle,
-        .node ellipse {{
-            stroke: {stroke_color};
-            /* Don't set stroke-width here, it's applied per-node */
-        }}
-        
-        .edgePath path {{
-            stroke: {stroke_color};
-            fill: {stroke_color};
-            stroke-width: 1.5px;
-        }}
-        
-        /* LaTeX-like typography */
-        .node text {{
-            font-family: 'Source Serif Pro', 'Computer Modern', 'Latin Modern Math', serif;
-            font-size: 14px;
-            font-weight: normal;
-            fill: {text_color} !important; /* Force text color */
-        }}
-        
-        .edgeLabel text {{
-            font-family: 'Source Serif Pro', 'Computer Modern', 'Latin Modern Math', serif;
-            font-size: 12px;
-            font-weight: normal;
-            fill: {stroke_color} !important; /* Force edge label color */
-        }}
-        </style>
-        """
-        )
-
-        obj = "fsa_" + str(uuid4()).replace("-", "_")
-        ret2.append(
-            f'<center><svg width="850" height="600" id="{obj}"><g/></svg></center>'
-        )
-        ret2.append(
-            """
-        <script>
-        (function render_d3() {
-            var d3, dagreD3;
-            try {
-                d3 = require('d3');
-                dagreD3 = require('dagreD3');
-            } catch (e) {
-                if(typeof window.d3 !== "undefined" && typeof window.dagreD3 !== "undefined"){
-                    d3 = window.d3;
-                    dagreD3 = window.dagreD3;
-                } else {
-                    setTimeout(render_d3, 50);
-                    return;
-                }
-            }
-            
-            // Create directed graph
-            var g = new dagreD3.graphlib.Graph().setGraph({
-                rankdir: 'LR',
-                marginx: 20,
-                marginy: 20,
-                ranksep: 50,
-                nodesep: 30
-            });
-        """
-        )
-        ret2.append("".join(ret))
-
-        ret2.append(f'var svg = d3.select("#{obj}"); \n')
-        ret2.append(
-            f"""
-            var inner = svg.select("g");
-            
-            // Set up zoom support
-            var zoom = d3.zoom().scaleExtent([0.3, 5]).on("zoom", function() {{
-                inner.attr("transform", d3.event.transform);
-            }});
-            svg.call(zoom);
-            
-            // Create the renderer
-            var render = new dagreD3.render();
-            
-            // Render the graph
-            render(inner, g);
-            
-            // Hide start node and apply styles after rendering
-            if (g.hasNode("start")) {{
-                d3.select(g.node("start").elem).style("opacity", "0");
-            }}
-            
-            // Force labels to be visible with correct colors
-            inner.selectAll("g.node text").style("fill", "{text_color}");
-            inner.selectAll(".edgeLabel text").style("fill", "{stroke_color}");
-            
-            // Center the graph
-            var initialScale = 0.75;
-            svg.call(zoom.transform, d3.zoomIdentity
-                .translate((svg.attr("width") - g.graph().width * initialScale) / 2, 20)
-                .scale(initialScale));
-                
-            // Adjust SVG height to fit graph
-            svg.attr('height', g.graph().height * initialScale + 40);
-        }})();
-        </script>
-        """
-        )
-
-        return "".join(ret2)
