@@ -1,14 +1,21 @@
 class State:
     """
-    Represents a state in a finite state automaton
+    Represents a state in a finite state automaton.
+
+    Each state has:
+    - A unique ID for identification
+    - An origin field that tracks where this state came from (useful for operations like product construction)
+    - An optional label for display purposes
+
+    States can be compared by ID for equality and used as dictionary keys.
     """
 
     def __init__(self, id, origin=None, label=None):
         """
-        Initialize a state
+        Initialize a state.
 
         Args:
-            id: Numeric ID for the state
+            id (int): Numeric ID for the state
             origin: Tuple representing the history/origin of the state
             label: Optional label for the state (defaults to str(id))
         """
@@ -19,6 +26,9 @@ class State:
         self.label = label if label is not None else str(self.origin)
 
     def __eq__(self, other):
+        """
+        States are equal if they have the same ID. Also allows comparison with integers.
+        """
         if isinstance(other, State):
             return self.id == other.id
         elif isinstance(other, int):
@@ -26,6 +36,9 @@ class State:
         return False
 
     def __hash__(self):
+        """
+        Hash function based on state ID, allowing States to be used as dictionary keys.
+        """
         return hash(self.id)
 
     def __repr__(self):
@@ -37,11 +50,26 @@ class State:
 
 class NonDeterministicFSA:
     """
-    Non-deterministic Finite State Automaton implementation.
+    Non-deterministic Finite State Automaton (NFA) implementation.
+
+    An NFA allows:
+    1. Multiple transitions from the same state on the same symbol
+    2. Epsilon transitions (though not implemented in this version)
+
+    Theoretical Background:
+    - NFAs, like DFAs, recognize regular languages
+    - NFAs can be more compact than equivalent DFAs
+    - Every NFA can be converted to an equivalent DFA (via the subset construction)
     """
 
     def __init__(self, num_states, alphabet):
-        """Initialize a non-deterministic FSA with a given number of states and alphabet."""
+        """
+        Initialize a non-deterministic FSA.
+
+        Args:
+            num_states (int): Number of states in the automaton
+            alphabet: Either a list of symbols or an integer size
+        """
         # Handle both alphabet list and alphabet size
         if isinstance(alphabet, list):
             self.alphabet = alphabet
@@ -66,7 +94,18 @@ class NonDeterministicFSA:
         self.theme = "dark"  # Default theme
 
     def _get_state_obj(self, state_id):
-        """Convert state ID to state object if needed"""
+        """
+        Convert state ID to state object if needed.
+
+        Args:
+            state_id: Either a state ID (int) or a State object
+
+        Returns:
+            State: The corresponding State object
+
+        Raises:
+            ValueError: If state_id is invalid
+        """
         if isinstance(state_id, State):
             return state_id
         elif isinstance(state_id, int) and 0 <= state_id < self.num_states:
@@ -75,14 +114,26 @@ class NonDeterministicFSA:
             raise ValueError(f"Invalid state: {state_id}")
 
     def set_state_label(self, state_id, label):
-        """Set a human-readable label for a state"""
+        """
+        Set a human-readable label for a state.
+
+        Args:
+            state_id: State ID or object
+            label: The new label string
+        """
         state = self._get_state_obj(state_id)
         state.label = label
 
     def set_transition(self, src_id, symbol, dst_id):
         """
-        Set a transition in the NFSA. For the same source state and symbol,
-        multiple destination states are allowed.
+        Set a transition in the NFA.
+
+        For NFAs, multiple destination states are allowed for the same (state, symbol) pair.
+
+        Args:
+            src_id (int): Source state ID
+            symbol: Alphabet symbol triggering the transition
+            dst_id (int): Destination state ID
         """
         if src_id >= len(self.states) or dst_id >= len(self.states):
             raise ValueError("State index out of bounds")
@@ -98,23 +149,38 @@ class NonDeterministicFSA:
         self.transitions[(src_state, symbol)].add(dst_state)
 
     def set_initial_state(self, state):
-        """Set the initial state"""
+        """
+        Set the initial state.
+
+        Args:
+            state: Either a state ID or a State object
+        """
         state_obj = self._get_state_obj(state)
         self.initial_state = state_obj
 
     def set_accepting_state(self, state):
-        """Set a state as an accepting state"""
+        """
+        Set a state as an accepting state.
+
+        Args:
+            state: Either a state ID or a State object
+        """
         state_obj = self._get_state_obj(state)
         self.accepting_states.add(state_obj)
 
     def get_transitions(self, state_id, symbol=None):
         """
         Get all transitions from a state, optionally filtered by symbol.
-        Returns a list of (symbol, destination_state) tuples.
 
         Args:
             state_id: Either a state ID (int) or a State object
             symbol: Optional symbol to filter by
+
+        Returns:
+            List of (symbol, destination_state_id) tuples
+
+        Raises:
+            ValueError: If state_id is invalid
         """
         # Handle both State objects and numeric IDs
         if isinstance(state_id, State):
@@ -140,7 +206,18 @@ class NonDeterministicFSA:
         return transitions
 
     def accepts(self, input_string):
-        """Check if the NFA accepts the given input string using a breadth-first search"""
+        """
+        Check if the NFA accepts the given input string using a breadth-first search.
+
+        An NFA accepts a string if, starting from the initial state and following all
+        possible transitions for each symbol, at least one path leads to an accepting state.
+
+        Args:
+            input_string (str): The string to check for acceptance
+
+        Returns:
+            bool: True if the string is accepted, False otherwise
+        """
         if self.initial_state is None:
             return False
 
@@ -167,9 +244,15 @@ class NonDeterministicFSA:
     def trim(self):
         """
         Remove unreachable states and states that cannot reach an accepting state.
-        Return a new NFSA with only the necessary states.
+
+        This operation:
+        1. Identifies states reachable from the initial state
+        2. Identifies states that can reach an accepting state
+        3. Keeps only states that satisfy both conditions
+
+        Returns:
+            A new NFA with only the necessary states
         """
-        # Implementation similar to FSA.trim() but adapted for non-deterministic transitions
         if self.initial_state is None:
             # No initial state, return empty automaton
             return NonDeterministicFSA(0, self.alphabet)
@@ -253,8 +336,16 @@ class NonDeterministicFSA:
 
     def determinize(self):
         """
-        Convert this NFSA to a deterministic FSA.
-        Returns a new FiniteStateAutomaton that accepts the same language.
+        Convert this NFA to a deterministic FSA using the subset construction.
+
+        The subset construction:
+        1. Creates states in the new DFA corresponding to sets of states in the NFA
+        2. The initial state of the DFA corresponds to the set containing the NFA's initial state
+        3. A state in the DFA is accepting if any of the corresponding NFA states is accepting
+        4. Transitions are computed by following all possible NFA transitions and grouping by symbol
+
+        Returns:
+            A new deterministic FSA that accepts the same language
         """
         from automathic.fsa.fsa import FiniteStateAutomaton
 
@@ -291,7 +382,7 @@ class NonDeterministicFSA:
 
         result.set_initial_state(0)
 
-        # Process subsets of states
+        # Process subsets of states using breadth-first search
         todo = [initial_subset]
         next_id = 1
 
@@ -306,7 +397,10 @@ class NonDeterministicFSA:
                 for state_id in current_subset:
                     for (src, sym), destinations in self.transitions.items():
                         if src.id == state_id and sym == symbol:
-                            next_states.update(dst.id for dst in destinations)
+                            if isinstance(destinations, set):
+                                next_states.update(dst.id for dst in destinations)
+                            else:
+                                next_states.add(destinations.id)
 
                 if not next_states:
                     continue
@@ -347,7 +441,6 @@ class NonDeterministicFSA:
             if any(s in accepting_ids for s in subset):
                 result.set_accepting_state(state_id)
 
-        # Trim the result FSA to the actual number of states used
         # Create a new FSA with just the states we've actually used
         final_result = FiniteStateAutomaton(result.num_states, self.alphabet)
 
@@ -374,7 +467,11 @@ class NonDeterministicFSA:
     def minimize(self):
         """
         Minimize this NFA by first determinizing it and then minimizing the resulting DFA.
-        Returns a minimized DFA that accepts the same language.
+
+        For NFAs, minimization requires first converting to a DFA.
+
+        Returns:
+            A minimized DFA that accepts the same language
         """
         # First convert the NFA to a DFA
         dfa = self.determinize()
@@ -384,14 +481,18 @@ class NonDeterministicFSA:
 
     def intersect(self, other):
         """
-        Create a product automaton that accepts the intersection of the languages
-        accepted by self and other.
+        Create a product automaton that accepts the intersection of the languages.
+
+        The product construction:
+        1. Creates states that are pairs of states from the two input automata
+        2. A state (q1, q2) is accepting if both q1 and q2 are accepting
+        3. Transitions are defined by following both automata simultaneously
 
         Args:
             other: Another NonDeterministicFSA or FiniteStateAutomaton
 
         Returns:
-            A new NonDeterministicFSA that accepts the intersection of the languages
+            A new automaton that accepts the intersection of the languages
         """
         from automathic.fsa.fsa import FiniteStateAutomaton
 
@@ -562,6 +663,127 @@ class NonDeterministicFSA:
         result.num_states = new_id
 
         return result
+
+    def is_equivalent(self, other):
+        """
+        Check if this automaton accepts the same language as another automaton.
+
+        Two automata are equivalent if they accept exactly the same strings.
+        This is implemented by checking if their symmetric difference
+        (union of A∩B̄ and Ā∩B) accepts any string.
+
+        Args:
+            other: Another NonDeterministicFSA or FiniteStateAutomaton
+
+        Returns:
+            bool: True if both automata accept exactly the same language
+        """
+        from automathic.fsa.fsa import FiniteStateAutomaton
+
+        # Check if alphabets match
+        if set(self.alphabet) != set(other.alphabet):
+            return False
+
+        # For NFAs, we need to determinize first for more efficient operations
+        self_dfa = (
+            self.determinize() if not isinstance(self, FiniteStateAutomaton) else self
+        )
+        other_dfa = (
+            other.determinize()
+            if not isinstance(other, FiniteStateAutomaton)
+            else other
+        )
+
+        # Compute the automaton accepting the symmetric difference
+        # (L(self) ∩ L(other)ᶜ) ∪ (L(self)ᶜ ∩ L(other))
+        # This is equivalent to: (L(self) ∪ L(other)) - (L(self) ∩ L(other))
+
+        # Get complements
+        self_complement = self_dfa.complement()
+        other_complement = other_dfa.complement()
+
+        # Get (L(self) ∩ L(other)ᶜ) - automaton accepting strings in self but not in other
+        diff_1 = self_dfa.intersect(other_complement)
+
+        # Get (L(self)ᶜ ∩ L(other)) - automaton accepting strings in other but not in self
+        diff_2 = self_complement.intersect(other_dfa)
+
+        # Union of differences - implemented by first converting to NFAs, then combining transitions
+        union = NonDeterministicFSA(
+            diff_1.num_states + diff_2.num_states + 1, self.alphabet
+        )
+
+        # Create a new initial state
+        union.set_initial_state(0)
+
+        # Copy states from diff_1, shifting IDs by 1
+        for i in range(diff_1.num_states):
+            state_obj = diff_1.states[i]
+            # Create a new state with the same properties but new ID
+            new_id = i + 1
+            union.states[new_id] = State(
+                new_id, origin=state_obj.origin, label=state_obj.label
+            )
+
+            # If this was an accepting state in diff_1, make it accepting in the union
+            if state_obj in diff_1.accepting_states:
+                union.set_accepting_state(new_id)
+
+            # Add epsilon transition from union's initial state to this state
+            if diff_1.initial_state and diff_1.initial_state.id == i:
+                # In NFAs, we add all transitions from initial state to the new state's transitions
+                for symbol, next_id in diff_1.get_transitions(i):
+                    union.set_transition(new_id, symbol, next_id + 1)
+
+        # Copy states from diff_2, shifting IDs by diff_1.num_states + 1
+        offset = diff_1.num_states + 1
+        for i in range(diff_2.num_states):
+            state_obj = diff_2.states[i]
+            # Create a new state with the same properties but new ID
+            new_id = i + offset
+            union.states[new_id] = State(
+                new_id, origin=state_obj.origin, label=state_obj.label
+            )
+
+            # If this was an accepting state in diff_2, make it accepting in the union
+            if state_obj in diff_2.accepting_states:
+                union.set_accepting_state(new_id)
+
+            # Add epsilon transition from union's initial state to this state
+            if diff_2.initial_state and diff_2.initial_state.id == i:
+                # In NFAs, we add all transitions from initial state to the new state's transitions
+                for symbol, next_id in diff_2.get_transitions(i):
+                    union.set_transition(new_id, symbol, next_id + offset)
+
+        # Add transitions from diff_1, shifting all state IDs by 1
+        for (src, symbol), destinations in diff_1.transitions.items():
+            if isinstance(destinations, set):  # NFA case
+                for dst in destinations:
+                    union.set_transition(src.id + 1, symbol, dst.id + 1)
+            else:  # DFA case
+                union.set_transition(src.id + 1, symbol, destinations.id + 1)
+
+        # Add transitions from diff_2, shifting all state IDs by offset
+        for (src, symbol), destinations in diff_2.transitions.items():
+            if isinstance(destinations, set):  # NFA case
+                for dst in destinations:
+                    union.set_transition(src.id + offset, symbol, dst.id + offset)
+            else:  # DFA case
+                union.set_transition(src.id + offset, symbol, destinations.id + offset)
+
+        # Add transitions from initial state to both automata's initial states
+        if diff_1.initial_state is not None:
+            for symbol, next_id in diff_1.get_transitions(diff_1.initial_state):
+                union.set_transition(0, symbol, next_id + 1)
+
+        if diff_2.initial_state is not None:
+            for symbol, next_id in diff_2.get_transitions(diff_2.initial_state):
+                union.set_transition(0, symbol, next_id + offset)
+
+        # The automata are equivalent if their symmetric difference accepts no strings
+        # This is true if the resulting automaton has no reachable accepting states
+        minimized = union.trim()
+        return len(minimized.accepting_states) == 0
 
     def __str__(self):
         return self.ascii()

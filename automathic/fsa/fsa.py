@@ -5,22 +5,46 @@ from automathic.fsa.nfa import NonDeterministicFSA, State
 
 class FiniteStateAutomaton(NonDeterministicFSA):
     """
-    Deterministic Finite State Automaton implementation.
-    Extends NonDeterministicFSA but enforces the deterministic constraint
-    of having at most one transition for each state-symbol pair.
+    Deterministic Finite State Automaton (DFA) implementation.
+
+    A DFA is a special case of NFA where:
+    1. Each (state, symbol) pair has exactly one outgoing transition
+    2. There are no epsilon (empty string) transitions
+
+    This implementation extends the NonDeterministicFSA class but enforces the
+    deterministic constraint by storing at most one destination state for each
+    (state, symbol) pair.
+
+    Theoretical Background:
+    - DFAs recognize regular languages
+    - For any NFA, there exists an equivalent DFA (potentially with more states)
+    - DFAs offer efficient string recognition (linear in the length of the string)
     """
 
     def __init__(self, num_states, alphabet):
-        """Initialize a deterministic FSA with a given number of states and alphabet."""
+        """
+        Initialize a deterministic FSA with a given number of states and alphabet.
+
+        Args:
+            num_states (int): Number of states in the automaton
+            alphabet (list): List of symbols in the alphabet
+        """
         super().__init__(num_states, alphabet)
-        # Redefine transitions as a dictionary mapping (state, symbol) to a single state
-        # We'll keep the same structure but enforce single destinations
+        # Override the transitions data structure to enforce determinism
+        # In a DFA, each (state, symbol) pair maps to exactly one state
         self.transitions = {}
 
     def set_transition(self, src_id, symbol, dst_id):
         """
-        Set a transition in the DFA. Each (state, symbol) pair can only
-        transition to a single destination state.
+        Set a transition in the DFA.
+
+        For a DFA, each (state, symbol) pair can transition to at most one state.
+        If a transition already exists for this pair, it will be overwritten.
+
+        Args:
+            src_id (int): Source state ID
+            symbol: Alphabet symbol triggering the transition
+            dst_id (int): Destination state ID
         """
         if src_id >= len(self.states) or dst_id >= len(self.states):
             raise ValueError("State index out of bounds")
@@ -32,12 +56,32 @@ class FiniteStateAutomaton(NonDeterministicFSA):
         self.transitions[(src_state, symbol)] = dst_state
 
     def transition(self, state, symbol):
-        """Get the next state for a given state and symbol"""
+        """
+        Get the next state for a given state and symbol.
+
+        Args:
+            state: Either a state ID (int) or a State object
+            symbol: An alphabet symbol
+
+        Returns:
+            The destination State object, or None if no transition exists
+        """
         state_obj = self._get_state_obj(state)
         return self.transitions.get((state_obj, symbol), None)
 
     def accepts(self, input_string):
-        """Check if the DFA accepts the given input string"""
+        """
+        Check if the DFA accepts the given input string.
+
+        A string is accepted if, starting from the initial state and following transitions
+        for each symbol in the string, we end in an accepting state.
+
+        Args:
+            input_string (str): The string to check for acceptance
+
+        Returns:
+            bool: True if the string is accepted, False otherwise
+        """
         if self.initial_state is None:
             return False
 
@@ -49,14 +93,25 @@ class FiniteStateAutomaton(NonDeterministicFSA):
         return state in self.accepting_states
 
     def minimize(self):
-        """Create a new minimized FSA using Hopcroft's algorithm."""
+        """
+        Create a new minimized FSA using Hopcroft's algorithm.
+
+        Hopcroft's algorithm works by partitioning states into equivalence classes:
+        1. Start with the partition [accepting states, non-accepting states]
+        2. Repeatedly refine the partition by splitting groups based on transitions
+        3. States in the same final group are equivalent and can be merged
+
+        Returns:
+            A new FiniteStateAutomaton with the minimal number of states that accepts
+            the same language as the original automaton
+        """
         # Start with the partition [accepting states, non-accepting states]
         partition = [
             self.accepting_states,
             set(self.states) - self.accepting_states,
         ]
 
-        # Remove the empty set if one of the partitions is empty
+        # Remove any empty partitions
         partition = [p for p in partition if p]
 
         # Repeatedly refine the partition until no more refinement is possible
@@ -89,7 +144,7 @@ class FiniteStateAutomaton(NonDeterministicFSA):
 
             partition = new_partition
 
-        # If no states, return empty FSA
+        # If no states remain, return empty FSA
         if not partition:
             return FiniteStateAutomaton(0, self.alphabet)
 
@@ -133,20 +188,12 @@ class FiniteStateAutomaton(NonDeterministicFSA):
 
     def is_complete(self):
         """
-        Check if the DFA is complete (has transitions for all symbols from all states)
-        """
-        for state_id in range(self.num_states):
-            state = self.states[state_id]
-            if state is None:
-                continue
-            for symbol in self.alphabet:
-                if self.transition(state_id, symbol) is None:
-                    return False
-        return True
+        Check if the DFA is complete (has transitions for all symbols from all states).
 
-    def is_complete(self):
-        """
-        Check if the DFA is complete (has transitions for all symbols from all states)
+        A complete DFA has a transition defined for every state-symbol pair.
+
+        Returns:
+            bool: True if the DFA is complete, False otherwise
         """
         for state_id in range(self.num_states):
             state = self.states[state_id]
@@ -160,7 +207,12 @@ class FiniteStateAutomaton(NonDeterministicFSA):
     def complete(self):
         """
         Make the DFA complete by adding a sink state if needed.
-        Returns a new complete DFA.
+
+        A sink state is a non-accepting state that transitions to itself for all symbols.
+        This is added to handle missing transitions in the original DFA.
+
+        Returns:
+            A new complete DFA
         """
         if self.is_complete():
             return self.copy()
@@ -195,8 +247,14 @@ class FiniteStateAutomaton(NonDeterministicFSA):
 
     def complement(self):
         """
-        Create a DFA that accepts exactly the strings rejected by self.
-        Ensures the DFA is complete first.
+        Create a DFA that accepts exactly the strings rejected by this automaton.
+
+        The complement operation:
+        1. Makes the DFA complete (adding a sink state if needed)
+        2. Flips the accepting/non-accepting status of all states
+
+        Returns:
+            A new DFA that accepts the complement language
         """
         # Make sure the DFA is complete
         complete_dfa = self.complete()
@@ -220,7 +278,12 @@ class FiniteStateAutomaton(NonDeterministicFSA):
         return result
 
     def copy(self):
-        """Create a deep copy of this DFA"""
+        """
+        Create a deep copy of this DFA.
+
+        Returns:
+            A new FiniteStateAutomaton identical to this one
+        """
         result = FiniteStateAutomaton(self.num_states, self.alphabet)
 
         # Copy transitions

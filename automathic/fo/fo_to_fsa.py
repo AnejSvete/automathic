@@ -20,7 +20,10 @@ class FOtoFSA:
     - Positions (first-order variables)
     - Labels (predicates on positions)
 
-    And works with arbitrary alphabets using Qa predicates.
+    And works with arbitrary alphabets using symbol predicates (Qa).
+
+    Straubing's construction builds automata compositionally from atomic formulas
+    and preserves the semantics of logical operations through automata operations.
     """
 
     def __init__(self, alphabet=None):
@@ -43,9 +46,10 @@ class FOtoFSA:
     def _powerset(self, V):
         """
         Generate the powerset of a set V (all possible subsets) in a deterministic order.
+        Used to represent all possible variable assignments at each position.
 
         Args:
-            V: A set of elements
+            V: A set of elements (variables)
 
         Returns:
             A list of all possible subsets of V
@@ -71,25 +75,36 @@ class FOtoFSA:
         Returns:
             A FiniteStateAutomaton equivalent to the formula
         """
+        # First ensure the formula is in FO[<] form (only existential quantifiers,
+        # conjunctions, negations, and < relations)
         formula = formula.to_fo_less()
 
-        V = sorted(formula.get_free_variables())  # Get the free variables
+        # Get free variables in sorted order for consistent processing
+        V = sorted(formula.get_free_variables())
 
+        # Construct the enriched alphabet: pairs of (symbol, variable_set)
+        # Each pair represents a position in the word with its symbol and variables
         V_alphabet = list(product(self.alphabet, self._powerset(V)))
 
         # Apply Straubing's construction recursively
         fsa = self._convert(formula, V, V_alphabet)
 
+        # For sentences (formulas with no free variables), project to the original alphabet
         if formula.is_sentence():
             return self._project(fsa)
         else:
             return fsa
 
     def _project(self, fsa):
-        """Project the automaton transitions to alphabet symbols only
+        """
+        Project the automaton transitions to alphabet symbols only, removing variable information.
+        This is used for sentence formulas where we only care about acceptance, not variable assignments.
 
         Args:
             fsa: The automaton to project
+
+        Returns:
+            A projected FSA with the original alphabet
         """
         # Create a new FSA with the same alphabet but no variables
         proj_fsa = FiniteStateAutomaton(fsa.num_states, self.alphabet)
@@ -106,33 +121,40 @@ class FOtoFSA:
 
         # Process transitions
         for (src_state, old_symbol), dst_state in fsa.transitions.items():
+            # Extract just the symbol part from (symbol, variables)
             symbol, _ = old_symbol
 
-            # Create new symbol without the variable
-            new_symbol = symbol
-            proj_fsa.set_transition(src_state.id, new_symbol, dst_state.id)
+            # Create new transition with just the symbol
+            proj_fsa.set_transition(src_state.id, symbol, dst_state.id)
 
         # Set accepting states
         for state in fsa.accepting_states:
             proj_fsa.set_accepting_state(state.id)
 
-        return proj_fsa.trim()  # Not minimizing to preserve state structure
+        # Return trimmed FSA (remove unreachable states)
+        return proj_fsa.trim()
 
     def _construct_V_structure_fsa(self, V, V_alphabet):
-        """Constructs the FSA that checks if a string is a valid V-structure.
+        """
+        Constructs the FSA that checks if a string is a valid V-structure.
 
         A valid V-structure assigns each variable to exactly one position,
-        with disjoint sets of variables at each position.
+        with disjoint sets of variables at each position. This is a fundamental
+        constraint for representing variable assignments in the automaton.
 
         Args:
             V: Set of free variables in the formula
+            V_alphabet: The enriched alphabet (symbols × variable sets)
+
+        Returns:
+            An FSA accepting only valid variable assignments
         """
         # Create an FSA with 2^|V| states (each state tracks seen variables)
         fsa = FiniteStateAutomaton(2 ** len(V), V_alphabet)
         P_V = self._powerset(V)
         v2idx = {v: i for i, v in enumerate(P_V)}
 
-        # State empty set is initial state
+        # State empty set is initial state (no variables seen yet)
         fsa.set_initial_state(v2idx[()])
 
         # For each state (representing variables we've seen so far)
@@ -143,7 +165,7 @@ class FOtoFSA:
             for symbol, vars_at_pos in V_alphabet:
                 vars_at_pos_set = set(vars_at_pos)
 
-                # Check that vars_at_pos is disjoint from seen_vars (no overlap)
+                # Check that vars_at_pos is disjoint from seen_vars (no variable appears twice)
                 if len(seen_vars_set.intersection(vars_at_pos_set)) == 0:
                     # Calculate new set of seen variables
                     new_seen_vars = tuple(sorted(seen_vars_set.union(vars_at_pos_set)))
@@ -153,52 +175,89 @@ class FOtoFSA:
                     )
 
         # Only the state where all variables have been seen is accepting
+        # This ensures every variable appears exactly once
         fsa.set_accepting_state(v2idx[tuple(sorted(V))])
 
         return fsa.trim().minimize()
 
     def _ensure_V_structure(self, fsa, V):
+        """
+        Ensures the FSA obeys the V-structure constraint by intersection.
+        This is used after every operation to maintain the variable assignment invariant.
+
+        Args:
+            fsa: The FSA to constrain
+            V: List of free variables
+
+        Returns:
+            An FSA that accepts only valid variable assignments
+        """
         V = sorted(V)  # Sort the variables for deterministic order
 
+        # Construct the enriched alphabet
         V_alphabet = list(product(self.alphabet, self._powerset(V)))
 
         # Construct the V-structure FSA
         V_structure_fsa = self._construct_V_structure_fsa(V, V_alphabet)
 
-        # Intersect the structure FSA with the FSA
+        # Intersect the structure FSA with the input FSA
+        # This ensures we only keep runs with valid variable assignments
         return V_structure_fsa.intersect(fsa).trim().minimize()
 
     def _convert(self, formula, V, V_alphabet):
-        """Internal recursive conversion method"""
+        """
+        Internal recursive conversion method that builds automata compositionally.
+
+        Args:
+            formula: The formula to convert
+            V: List of free variables
+            V_alphabet: The enriched alphabet
+
+        Returns:
+            An FSA equivalent to the formula
+        """
         if isinstance(formula, Predicate):
             return self._convert_predicate(formula, V_alphabet, V)
         elif isinstance(formula, Relation):
             return self._convert_relation(formula, V_alphabet, V)
         elif isinstance(formula, Negation):
+            # For negation: complement the automaton and ensure V-structure
             return self._ensure_V_structure(
                 self._convert(formula.subformula, V, V_alphabet).complement(), V
             )
         elif isinstance(formula, Conjunction):
-            # Use the same V and V_alphabet for both sides
+            # For conjunction: intersect the automata of both subformulas
             left_fsa = self._convert(formula.left, V, V_alphabet)
             right_fsa = self._convert(formula.right, V, V_alphabet)
             intersection_fsa = left_fsa.intersect(right_fsa)
             return self._ensure_V_structure(intersection_fsa, V)
         elif isinstance(formula, ExistentialQuantifier):
-
-            _V = V + [formula.variable]  # Add the new variable to the list
+            # For existential quantifier: add the new variable to the set
+            _V = V + [formula.variable]
             _V_alphabet = list(product(self.alphabet, self._powerset(_V)))
 
+            # Convert the subformula with the extended variable set
             subformula_fsa = self._convert(formula.subformula, _V, _V_alphabet)
 
-            # Only remove the variable in the final step
+            # Then remove the quantified variable to get the final automaton
             return self._remove_variable(subformula_fsa, V_alphabet, formula.variable)
         else:
             raise ValueError(f"Unsupported formula type: {type(formula).__name__}")
 
     def _convert_predicate(self, predicate, V_alphabet, V):
-        """Convert a position predicate to an FSA"""
-        # We only support Qa predicates (testing for specific alphabet symbols)
+        """
+        Convert a position predicate to an FSA.
+        Handles symbol predicates like Qa(x) which test if position x has symbol a.
+
+        Args:
+            predicate: The predicate to convert
+            V_alphabet: The enriched alphabet
+            V: List of free variables
+
+        Returns:
+            An FSA accepting words where the predicate holds
+        """
+        # We only support symbol predicates (testing for specific alphabet symbols)
         if isinstance(predicate, SymbolPredicate):
             symbol = predicate.symbol  # Extract the symbol (e.g., "a" from "Qa")
             variable = predicate.variable  # Extract the variable (e.g., "x" from "Qa")
@@ -217,47 +276,72 @@ class FOtoFSA:
             # Set initial state
             fsa.set_initial_state(0)
 
-            # For each symbol in the alphabet
+            # For each symbol-variable pair in the enriched alphabet
             for alph_symbol in fsa.alphabet:
-                if alph_symbol[0] == symbol and variable in alph_symbol[1]:
-                    # When we see the matching symbol, go to accepting state
+                symbol_at_pos, vars_at_pos = alph_symbol
+
+                if symbol_at_pos == symbol and variable in vars_at_pos:
+                    # When we see the matching symbol with our variable, go to accepting state
                     fsa.set_transition(0, alph_symbol, 1)
                 else:
                     # When we see any other symbol, stay in initial state
                     fsa.set_transition(0, alph_symbol, 0)
 
                 # Once in accepting state, stay there regardless of symbol
+                # This implements "we saw the symbol at the variable position at least once"
                 fsa.set_transition(1, alph_symbol, 1)
 
             # Mark the accepting state
             fsa.set_accepting_state(1)
 
+            # Ensure the FSA obeys variable assignment constraints
             return self._ensure_V_structure(fsa, V)
         else:
             raise ValueError(
-                f"Unsupported predicate: {predicate.name}. Only Q predicates are supported."
+                f"Unsupported predicate: {predicate.name}. Only symbol predicates are supported."
             )
 
     def _convert_relation(self, relation, V_alphabet, V):
-        """Convert a numerical relation to an FSA following Straubing's construction"""
+        """
+        Convert a numerical relation to an FSA following Straubing's construction.
+        Currently only supports the < relation (strict ordering).
+
+        Args:
+            relation: The relation to convert
+            V_alphabet: The enriched alphabet
+            V: List of free variables
+
+        Returns:
+            An FSA accepting words where the relation holds
+        """
         left, op, right = relation.left, relation.operator, relation.right
 
         # Less than: x < y
         if op == "<":
             return self._relation_lt(left, right, V_alphabet, V)
-
         else:
             raise ValueError(f"Unsupported relation: {left} {op} {right}")
 
     def _relation_lt(self, var1, var2, V_alphabet, V):
-        """x < y: var1 position is strictly less than var2 position"""
+        """
+        Builds an FSA for the relation x < y (var1 position is strictly less than var2 position).
+
+        Args:
+            var1: First variable
+            var2: Second variable
+            V_alphabet: The enriched alphabet
+            V: List of free variables
+
+        Returns:
+            An FSA accepting words where var1 appears before var2
+        """
         fsa = FiniteStateAutomaton(3, V_alphabet)
 
         # State 0: Initial state, haven't seen either position
         # State 1: Seen position var1, waiting for var2
         # State 2: Accepting state, seen both positions in correct order
 
-        # For every symbol in the alphabet
+        # For every symbol in the enriched alphabet
         for V_symbol in fsa.alphabet:
             _, vars_at_pos = V_symbol
 
@@ -278,14 +362,22 @@ class FOtoFSA:
         # Set accepting state
         fsa.set_accepting_state(2)
 
+        # Ensure the FSA obeys variable assignment constraints
         return self._ensure_V_structure(fsa, V)
 
     def _remove_variable(self, fsa, V_alphabet, variable):
         """
-        Remove variable by creating an NFSA with 'seen' and 'unseen' states
-        that allows non-deterministic transitions.
-        """
+        Remove a quantified variable by creating an NFA with 'seen' and 'unseen' states.
+        This implements existential quantification through non-determinism.
 
+        Args:
+            fsa: The FSA for the subformula
+            V_alphabet: The target alphabet (without the quantified variable)
+            variable: The variable to remove
+
+        Returns:
+            An FSA equivalent to existential quantification over the variable
+        """
         from automathic.fsa.nfa import NonDeterministicFSA
 
         # Create mapping from pairs (original_state, seen_bit) to new state IDs
@@ -295,12 +387,13 @@ class FOtoFSA:
         for state_id in range(fsa.num_states):
             if fsa.states[state_id] is not None:
                 # Each state gets two copies - one for 'seen=0' and one for 'seen=1'
+                # This tracks whether we've seen the quantified variable
                 p2idx[(state_id, 0)] = idx
                 idx += 1
                 p2idx[(state_id, 1)] = idx
                 idx += 1
 
-        # Create a new NFSA with double the number of states
+        # Create a new NFA with double the number of states
         result = NonDeterministicFSA(idx, V_alphabet)
 
         # Copy state origins and set labels
@@ -349,20 +442,25 @@ class FOtoFSA:
             result.set_transition(seen_src_id, new_symbol, seen_dst_id)
 
             if var_present:
+                # Non-deterministic transition - can choose to make this the position
+                # for the quantified variable
                 result.set_transition(unseen_src_id, new_symbol, seen_dst_id)
 
         # Set accepting states - a state is accepting if it corresponds to an accepting
-        # state in the original FSA and the variable has been seen
+        # state in the original FSA and the quantified variable has been seen
         for state in fsa.accepting_states:
             accept_id = p2idx[(state.id, 1)]
             result.set_accepting_state(accept_id)
 
+        # Convert back to a deterministic FSA and minimize
         return result.trim().determinize().minimize()
 
 
 def convert_fo_to_fsa(formula, alphabet=None):
     """
     Convert a First-Order formula to an FSA following Straubing's construction.
+
+    This is the main entry point function for formula-to-automaton conversion.
 
     Args:
         formula: An FOFormula instance or formula string
@@ -378,8 +476,11 @@ def convert_fo_to_fsa(formula, alphabet=None):
     if isinstance(formula, str):
         formula = parse_fo_formula(formula)
 
+    # Extract alphabet from the formula if not provided
+    derived_alphabet = formula.get_alphabet() if alphabet is None else alphabet
+
     # Convert to FSA
-    converter = FOtoFSA(formula.get_alphabet() if alphabet is None else alphabet)
+    converter = FOtoFSA(derived_alphabet)
     automaton = converter.convert(formula)
 
     return automaton

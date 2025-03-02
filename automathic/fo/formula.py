@@ -1,7 +1,36 @@
+"""
+First-Order Logic Formula Representations
+
+This module provides classes for representing First-Order Logic (FO) formulas
+over words, supporting:
+
+- Basic formula types (predicates, negation, conjunction, etc.)
+- Quantifiers (existential and universal)
+- Symbol predicates for testing letter occurrences (Qa(x))
+- Position relations (<, ≤, etc.)
+
+It also includes methods for:
+- Converting formulas to canonical forms
+- Manipulating formulas and extracting properties
+- Converting formulas to equivalent finite state automata
+- String representations and visualization
+"""
+
 from dataclasses import dataclass
 
 
 class FOFormula:
+    """
+    Base class for all First-Order Logic formulas.
+
+    First-Order Logic over words allows us to express properties of words
+    by quantifying over positions and stating relationships between them.
+
+    Examples:
+        - "There exists a position with symbol 'a'": ∃x.Qa(x)
+        - "Every 'a' is followed by a 'b'": ∀x.(Qa(x) → ∃y.(x < y ∧ Qb(y)))
+    """
+
     def get_variables(self):
         """
         Extract all variables used in the formula. This includes quantified variables
@@ -118,8 +147,19 @@ class FOFormula:
 
     def to_fo_less(self):
         """
-        Convert a formula into one that only uses the < relation and existential quantifiers (canonical form for FO[<]).
-        This transforms formulas with <=, >=, >, =, and successor (x = y+1) relations.
+        Convert a formula into one that only uses the < relation and existential quantifiers
+        (canonical form for FO[<]).
+
+        FO[<] is the fragment of first-order logic with:
+        - Only the less-than relation (<) for position comparisons
+        - Existential quantifiers (∃)
+        - Boolean operations (conjunction, negation)
+
+        This method transforms formulas with other relations (<=, >=, >, =)
+        and universal quantifiers into equivalent FO[<] formulas.
+
+        Returns:
+            FOFormula: An equivalent formula in FO[<] form
         """
         if isinstance(self, Relation):
             left, op, right = self.left, self.operator, self.right
@@ -197,6 +237,8 @@ class FOFormula:
         elif isinstance(self, Conjunction):
             return Conjunction(self.left.to_fo_less(), self.right.to_fo_less())
         elif isinstance(self, Disjunction):
+            # For FO[<], disjunction is expressed using De Morgan's laws:
+            # A ∨ B ≡ ¬(¬A ∧ ¬B)
             return Negation(
                 Conjunction(
                     Negation(self.left.to_fo_less()), Negation(self.right.to_fo_less())
@@ -223,6 +265,9 @@ class FOFormula:
         - Conjunctions (∧)
         - Negations (¬)
         - Less-than relations (<)
+
+        FO[<] is important because it corresponds to the star-free languages,
+        a proper subset of regular languages with nice algebraic properties.
 
         Returns:
             bool: True if the formula is in FO[<], False otherwise
@@ -344,10 +389,15 @@ class FOFormula:
     def to_enf(self):
         """
         Convert formula to Existential Normal Form (ENF).
+
         In ENF:
         1. All quantifiers are at the beginning of the formula
         2. All quantifiers are existential (∃)
         3. No negations apply to subformulas with quantifiers
+
+        ENF is useful for:
+        - Matching the canonical form for automata conversion
+        - Simplifying formula analysis and manipulation
         """
         # First push negations inward
         formula = self._push_negation_inward()
@@ -359,7 +409,19 @@ class FOFormula:
         return prenex_form._convert_universals_to_existentials()
 
     def _push_negation_inward(self):
-        """Push negations inward until they only apply to atomic formulas"""
+        """
+        Push negations inward until they only apply to atomic formulas.
+
+        This is a crucial step in formula normalization, applying rules like:
+        - ¬¬φ ≡ φ
+        - ¬(φ ∧ ψ) ≡ ¬φ ∨ ¬ψ
+        - ¬(φ ∨ ψ) ≡ ¬φ ∧ ¬ψ
+        - ¬∃x.φ(x) ≡ ∀x.¬φ(x)
+        - ¬∀x.φ(x) ≡ ∃x.¬φ(x)
+
+        Returns:
+            FOFormula: Formula with negations pushed inward
+        """
         if isinstance(self, Predicate) or isinstance(self, Relation):
             # Base case: atomic formulas remain unchanged
             return self
@@ -417,7 +479,16 @@ class FOFormula:
     def to_prenex_form(self):
         """
         Convert formula to prenex form (quantifiers at front).
+
+        A formula is in prenex form when all quantifiers appear at the beginning,
+        followed by a quantifier-free matrix. For example:
+        - ∃x.∀y.(P(x) ∧ Q(y)) is in prenex form
+        - (∃x.P(x)) ∧ Q(y) is not in prenex form
+
         This version keeps universal quantifiers as universal.
+
+        Returns:
+            FOFormula: Formula in prenex form
         """
         prenex_form, _ = self._to_prenex_form_helper()
         return prenex_form

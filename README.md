@@ -17,7 +17,7 @@ Automathic is a Python library for exploring formal language theory, including f
 Clone the repository:
 
 ```bash
-$ git clone https://github.com/yourusername/FO-FSA.git
+$ git clone https://github.com/anejsvete/FO-FSA.git
 $ cd FO-FSA
 ```
 
@@ -63,33 +63,79 @@ print(fsa.accepts('011'))  # False
 #### Working with First-Order Logic Formulas
 
 ```python
-from automathic.fo.formula import Atom, Exists, ForAll, Conjunction
+from automathic.fo.parser import parse_fo_formula
 
-# Create the formula ∃x. P(x) ∧ Q(x)
-p_x = Atom("P", ["x"])
-q_x = Atom("Q", ["x"])
-conjunction = Conjunction(p_x, q_x)
-formula = Exists("x", conjunction)
+# Parse a formula from a string
+formula_str = "exists x. (Qa(x) and forall y. (!Qa(y) or x = y))"
+formula = parse_fo_formula(formula_str)
 
-print(formula)  # ∃x.(P(x) ∧ Q(x))
+# Display the parsed formula (with color formatting in terminals)
+print(formula)  # ∃x.(Qa(x) ∧ ∀y.(¬Qa(y) ∨ x = y))
+
+# Convert to form with only "<" relation and simplify
+simplified = formula.to_fo_less().simplify()
+print(simplified)
 ```
+
+## First-Order Logic and Finite State Automata
+
+### The Connection Between Logic and Automata
+
+First-order logic over words (FO) and finite state automata (FSA) are deeply connected. Büchi's theorem establishes that a language is definable in the Monadic Second-Order Logic (MSO) if and only if it is recognizable by a finite automaton. For first-order logic specifically:
+
+- **FO[<]**: First-order logic with the "less than" relation corresponds to a proper subset of regular languages called the **star-free languages**.
+- **Straubing's Construction**: This library implements Straubing's construction, which provides an algorithm to convert FO[<] formulas to equivalent FSAs.
+
+### How the Conversion Works
+
+The conversion from FO to FSA is compositional, meaning we:
+
+1. Build automata for atomic formulas (like position predicates and ordering relations)
+2. Combine these automata using operations that mirror logical operations:
+   - Conjunction → Automata intersection
+   - Disjunction → Automata union
+   - Negation → Automata complement
+   - Existential quantification → Projection and determinization
+
+The resulting automaton accepts exactly the words that satisfy the original formula.
 
 #### Converting FO Formula to FSA
 
 ```python
-from automathic.fo.convert import formula_to_fsa
-from automathic.fo.formula import *
+from automathic.fo.parser import parse_fo_formula
 
-# Create a formula: ∃x.(∀y. x < y)
-formula = Exists("x", ForAll("y", LessThan("x", "y")))
+# Define a formula for "strings that start with 'a'"
+formula_str = "exists x. (forall y. (!(y < x)) and Qa(x))"
 
-# Convert to FSA
-fsa = formula_to_fsa(formula)
+# Parse the string into a formula object
+formula = parse_fo_formula(formula_str)
+
+# Convert to FSA over alphabet {a, b}
+fsa = formula.to_fsa(alphabet=["a", "b"])
 
 # Test the resulting automaton
-print(fsa.accepts("01"))     # True: 0 < 1
-print(fsa.accepts("0123"))   # True: 0 < all others
-print(fsa.accepts("10"))     # False: not 1 < 0
+print(fsa.accepts("ab"))     # True: starts with 'a'
+print(fsa.accepts("abb"))    # True: starts with 'a'
+print(fsa.accepts("ba"))     # False: doesn't start with 'a'
+```
+
+#### Working with Formula Collections
+
+```python
+from automathic.fo.parser import parse_fo_formula
+
+# Language of strings with exactly one 'a'
+formula_str = "exists x. (Qa(x) and forall y. (!Qa(y) or x = y))"
+formula = parse_fo_formula(formula_str)
+
+# Convert to FSA and reindex states for cleaner visualization
+fsa = formula.to_fsa(alphabet=["a", "b"]).reindex()
+
+# Test the automaton
+print(fsa.accepts("a"))      # True: exactly one 'a'
+print(fsa.accepts("aba"))    # False: more than one 'a'
+print(fsa.accepts("bab"))    # True: exactly one 'a'
+print(fsa.accepts("bbb"))    # False: no 'a's
 ```
 
 ### Advanced Operations
@@ -108,13 +154,12 @@ intersection = fsa1.intersect(fsa2)
 def are_equivalent(fsa1, fsa2):
     min1 = fsa1.minimize()
     min2 = fsa2.minimize()
-    # Compare minimized automata structure
-    # ... (implementation details)
+    return min1.is_equivalent(min2)
 ```
 
 ## Documentation
 
-For full documentation, including API reference and tutorials, visit our [documentation site](https://yourusername.github.io/FO-FSA/) (coming soon).
+For full documentation, including API reference and tutorials, visit our [documentation site](https://anejsvete.github.io/FO-FSA/) (coming soon).
 
 ## Development
 
@@ -124,7 +169,7 @@ We welcome contributions to Automathic! Here are some guidelines for development
 
 We use:
 - [Black](https://github.com/psf/black) for code formatting
-- [Flake8](https://flake8.pycqa.org/en/latest/) for linting
+- [ruff](https://docs.astral.sh/ruff/) for linting
 - [Pytest](https://docs.pytest.org) for unit testing
 
 ### Running Tests
