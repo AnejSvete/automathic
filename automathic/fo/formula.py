@@ -588,7 +588,7 @@ class FOFormula:
         Args:
             alphabet (list): List of symbols in the alphabet (default: None)
         """
-        from fo_to_fsa import convert_fo_to_fsa
+        from automathic.fo.fo_to_fsa import convert_fo_to_fsa
 
         return convert_fo_to_fsa(self, alphabet)
 

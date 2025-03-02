@@ -1,6 +1,4 @@
-import json
 from collections import defaultdict
-from uuid import uuid4
 
 
 class State:
@@ -436,12 +434,6 @@ class FiniteStateAutomaton:
 
         return result
 
-    def project(self, position):
-        """
-        Project out a position from the FSA.
-        """
-        return self.copy()  # Simplified implementation
-
     def trim(self):
         """
         Create a new FSA with all unreachable and dead-end states removed,
@@ -559,40 +551,8 @@ class FiniteStateAutomaton:
 
         return result
 
-    def retuple(self):
-        """
-        Process complex state labels created during minimize, intersect, etc.
-        Extracts all numbers from state labels and creates a simplified tuple representation.
-
-        Returns:
-            A new FSA with simplified tuple-based labels
-        """
-        result = self.copy()
-
-        for state in result.states:
-            if state is None:
-                continue
-
-            label = state.label
-
-            # Skip if already a simple number
-            if isinstance(label, str) and label.isdigit():
-                continue
-
-            # Extract all numbers from the label
-            import re
-
-            numbers = re.findall(r"\d+", str(label))
-
-            if numbers:
-                # Create a simple tuple representation with the extracted numbers
-                state.label = f"({','.join(numbers)})"
-
-        return result
-
     def __str__(self):
-        initial_id = self.initial_state.id if self.initial_state else None
-        return f"FSA(states={self.num_states}, alphabet={self.alphabet}, initial={initial_id}, accepting={[s.id for s in self.accepting_states]})"
+        return self.ascii()
 
     def ascii(self):
         """

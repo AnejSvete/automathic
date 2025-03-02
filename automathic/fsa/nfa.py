@@ -1,4 +1,4 @@
-from fsa import FiniteStateAutomaton, State
+from automathic.fsa.fsa import FiniteStateAutomaton, State
 
 
 class NonDeterministicFSA(FiniteStateAutomaton):
@@ -126,7 +126,7 @@ class NonDeterministicFSA(FiniteStateAutomaton):
         Convert this NFSA to a deterministic FSA.
         Returns a new FiniteStateAutomaton that accepts the same language.
         """
-        from fsa import FiniteStateAutomaton
+        from automathic.fsa.fsa import FiniteStateAutomaton
 
         if self.initial_state is None:
             return FiniteStateAutomaton(0, self.alphabet)

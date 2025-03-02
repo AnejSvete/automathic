@@ -6,5 +6,5 @@ fix = true        # Autofix issues when possible
 profile = "black"
 
 [[tool.mypy.overrides]]
-module = ["IPython.*"]
+module = ["IPython.*", "setuptools.*"]
 ignore_missing_imports = true

@@ -1,6 +1,6 @@
 import re
 
-from formula import (
+from automathic.fo.formula import (
     Conjunction,
     Disjunction,
     ExistentialQuantifier,
@@ -20,7 +20,7 @@ def tokenize(formula: str):
     number_pattern = r"\d+"
     operator_pattern = r"<=|>=|=|<|>|\+"
     special_chars_pattern = r"[()\&|!.]"
-    keyword_pattern = r"and|or"
+    keyword_pattern = r"and|or|not"  # Added "not" to keywords
 
     # Combine patterns
     combined_pattern = f"({quantifier_pattern})|({identifier_pattern})|({number_pattern})|({operator_pattern})|({special_chars_pattern})|({keyword_pattern})"
@@ -74,7 +74,7 @@ class FOParser:
     def parse_primary(self):
         token = self.peek()
 
-        if token == "!":
+        if token == "!" or token == "not":  # Modified to support both "!" and "not"
             self.consume()
             return Negation(self.parse_primary())
         elif token in {"exists", "forall"}:

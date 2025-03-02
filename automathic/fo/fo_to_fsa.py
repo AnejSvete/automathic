@@ -1,16 +1,14 @@
 from itertools import product
 
-from formula import (
+from automathic.fo.formula import (
     Conjunction,
-    Disjunction,
     ExistentialQuantifier,
     Negation,
     Predicate,
     Relation,
     SymbolPredicate,
-    UniversalQuantifier,
 )
-from fsa import FiniteStateAutomaton, State
+from automathic.fsa.fsa import FiniteStateAutomaton, State
 
 
 class FOtoFSA:
@@ -75,8 +73,7 @@ class FOtoFSA:
         """
         formula = formula.to_fo_less()
 
-        V = formula.get_variables()
-        V = sorted(V)  # Sort the variables for deterministic order
+        V = sorted(formula.get_free_variables())  # Get the free variables
 
         V_alphabet = list(product(self.alphabet, self._powerset(V)))
 
@@ -172,11 +169,6 @@ class FOtoFSA:
         return V_structure_fsa.intersect(fsa).trim().minimize()
 
     def _convert(self, formula, V, V_alphabet):
-        # V = formula.get_variables()
-        # V = sorted(V)  # Sort the variables for deterministic order
-
-        # V_alphabet = list(product(self.alphabet, self._powerset(V)))
-
         """Internal recursive conversion method"""
         if isinstance(formula, Predicate):
             return self._convert_predicate(formula, V_alphabet, V)
@@ -187,15 +179,20 @@ class FOtoFSA:
                 self._convert(formula.subformula, V, V_alphabet).complement(), V
             )
         elif isinstance(formula, Conjunction):
+            # Use the same V and V_alphabet for both sides
             left_fsa = self._convert(formula.left, V, V_alphabet)
             right_fsa = self._convert(formula.right, V, V_alphabet)
             intersection_fsa = left_fsa.intersect(right_fsa)
             return self._ensure_V_structure(intersection_fsa, V)
         elif isinstance(formula, ExistentialQuantifier):
-            # For existential quantification, we project out the variable
-            return self._remove_variable(
-                self._convert(formula.subformula, V, V_alphabet), V, formula.variable
-            )
+
+            _V = V + [formula.variable]  # Add the new variable to the list
+            _V_alphabet = list(product(self.alphabet, self._powerset(_V)))
+
+            subformula_fsa = self._convert(formula.subformula, _V, _V_alphabet)
+
+            # Only remove the variable in the final step
+            return self._remove_variable(subformula_fsa, V_alphabet, formula.variable)
         else:
             raise ValueError(f"Unsupported formula type: {type(formula).__name__}")
 
@@ -283,17 +280,13 @@ class FOtoFSA:
 
         return self._ensure_V_structure(fsa, V)
 
-    def _remove_variable(self, fsa, V, variable):
+    def _remove_variable(self, fsa, V_alphabet, variable):
         """
         Remove variable by creating an NFSA with 'seen' and 'unseen' states
         that allows non-deterministic transitions.
         """
 
-        from nfa import NonDeterministicFSA
-
-        # Create new alphabet without the projected variable
-        V_new = sorted(set(V) - {variable})
-        alphabet_new = list(product(self.alphabet, self._powerset(V_new)))
+        from automathic.fsa.nfa import NonDeterministicFSA
 
         # Create mapping from pairs (original_state, seen_bit) to new state IDs
         p2idx = {}  # (state_id, seen_bit) -> new_state_id
@@ -308,7 +301,7 @@ class FOtoFSA:
                 idx += 1
 
         # Create a new NFSA with double the number of states
-        result = NonDeterministicFSA(idx, alphabet_new)
+        result = NonDeterministicFSA(idx, V_alphabet)
 
         # Copy state origins and set labels
         for (orig_id, seen_bit), new_id in p2idx.items():
@@ -364,7 +357,7 @@ class FOtoFSA:
             accept_id = p2idx[(state.id, 1)]
             result.set_accepting_state(accept_id)
 
-        return self._ensure_V_structure(result.trim().determinize().minimize(), V_new)
+        return result.trim().determinize().minimize()
 
 
 def convert_fo_to_fsa(formula, alphabet=None):
@@ -379,7 +372,7 @@ def convert_fo_to_fsa(formula, alphabet=None):
     Returns:
         A FiniteStateAutomaton equivalent to the formula
     """
-    from parser import parse_fo_formula
+    from automathic.fo.parser import parse_fo_formula
 
     # Parse string formulas
     if isinstance(formula, str):

@@ -1,4 +1,4 @@
-from fsa import FiniteStateAutomaton
+from automathic.fsa.fsa import FiniteStateAutomaton
 
 
 def create_substring_abc_automaton():
