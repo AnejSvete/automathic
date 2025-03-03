@@ -53,7 +53,7 @@ class FiniteStateAutomaton(NonDeterministicFSA):
         dst_state = self.states[dst_id]
 
         # For a DFA, overwrite any existing transition for this state-symbol pair
-        self.transitions[(src_state, symbol)] = dst_state
+        self.transitions[(src_state, symbol)] = {dst_state}
 
     def transition(self, state, symbol):
         """
@@ -67,7 +67,8 @@ class FiniteStateAutomaton(NonDeterministicFSA):
             The destination State object, or None if no transition exists
         """
         state_obj = self._get_state_obj(state)
-        return self.transitions.get((state_obj, symbol), None)
+        dst = self.transitions.get((state_obj, symbol), None)
+        return next(iter(dst)) if dst else None
 
     def accepts(self, input_string):
         """
@@ -264,7 +265,7 @@ class FiniteStateAutomaton(NonDeterministicFSA):
 
         # Copy all transitions
         for (src, symbol), dst in complete_dfa.transitions.items():
-            result.set_transition(src.id, symbol, dst.id)
+            result.set_transition(src.id, symbol, next(iter(dst)).id)
 
         # Copy initial state
         if complete_dfa.initial_state is not None:
@@ -288,7 +289,7 @@ class FiniteStateAutomaton(NonDeterministicFSA):
 
         # Copy transitions
         for (src, symbol), dst in self.transitions.items():
-            result.set_transition(src.id, symbol, dst.id)
+            result.set_transition(src.id, symbol, next(iter(dst)).id)
 
         # Copy initial state
         if self.initial_state is not None:

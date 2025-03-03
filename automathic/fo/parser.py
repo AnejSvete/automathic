@@ -3,24 +3,31 @@ import re
 from automathic.fo.formula import (
     Conjunction,
     Disjunction,
+    Equivalence,  # two new formula classes
     ExistentialQuantifier,
+    ExistentialSetQuantifier,
+    Implication,  # Need to import these
     Negation,
     Predicate,
     Relation,
+    SetMembership,
     SymbolPredicate,
     UniversalQuantifier,
+    UniversalSetQuantifier,
 )
 
 
-# === FO FORMULA PARSER ===
+# === SOM FORMULA PARSER ===
 def tokenize(formula: str):
     # Define patterns for different token types
     quantifier_pattern = r"exists|forall"
     identifier_pattern = r"[A-Za-z_][A-Za-z0-9_]*"
     number_pattern = r"\d+"
-    operator_pattern = r"<=|>=|=|<|>|\+"
+    operator_pattern = r"<=>|=>|<=|>=|=|<|>|\+|in"  # Added "<=>" and "=>" for logical equivalence and implication
     special_chars_pattern = r"[()\&|!.]"
-    keyword_pattern = r"and|or|not"  # Added "not" to keywords
+    keyword_pattern = (
+        r"and|or|not|iff|implies"  # Added "iff" and "implies" as alternatives
+    )
 
     # Combine patterns
     combined_pattern = f"({quantifier_pattern})|({identifier_pattern})|({number_pattern})|({operator_pattern})|({special_chars_pattern})|({keyword_pattern})"
@@ -39,7 +46,7 @@ def tokenize(formula: str):
     return result
 
 
-class FOParser:
+class SOMParser:
     def __init__(self, tokens):
         self.tokens = tokens
         self.index = 0
@@ -53,7 +60,23 @@ class FOParser:
         return token
 
     def parse_formula(self):
-        return self.parse_bool_expression()
+        return self.parse_implies_expression()
+
+    def parse_implies_expression(self):
+        left = self.parse_iff_expression()
+        while self.peek() in {"=>", "implies"}:
+            self.consume()  # Consume "=>" or "implies"
+            right = self.parse_iff_expression()
+            left = Implication(left, right)
+        return left
+
+    def parse_iff_expression(self):
+        left = self.parse_bool_expression()
+        while self.peek() in {"<=>", "iff"}:
+            self.consume()  # Consume "<=>" or "iff"
+            right = self.parse_bool_expression()
+            left = Equivalence(left, right)
+        return left
 
     def parse_bool_expression(self):
         left = self.parse_term()
@@ -74,7 +97,7 @@ class FOParser:
     def parse_primary(self):
         token = self.peek()
 
-        if token == "!" or token == "not":  # Modified to support both "!" and "not"
+        if token == "!" or token == "not":  # Support both "!" and "not"
             self.consume()
             return Negation(self.parse_primary())
         elif token in {"exists", "forall"}:
@@ -92,17 +115,33 @@ class FOParser:
         quantifier = self.consume()
         variable = self.consume()
 
+        # Check if this is a set variable (uppercase first letter)
+        is_set_variable = variable[0].isupper()
+
         # If there's a "." after the variable, consume it
         if self.peek() == ".":
             self.consume()
 
+        # Create the appropriate quantifier based on type and variable kind
         if quantifier == "exists":
-            return ExistentialQuantifier(variable, self.parse_primary())
+            if is_set_variable:
+                return ExistentialSetQuantifier(variable, self.parse_primary())
+            else:
+                return ExistentialQuantifier(variable, self.parse_primary())
         else:  # forall
-            return UniversalQuantifier(variable, self.parse_primary())
+            if is_set_variable:
+                return UniversalSetQuantifier(variable, self.parse_primary())
+            else:
+                return UniversalQuantifier(variable, self.parse_primary())
 
     def parse_atomic_formula(self):
         token = self.consume()
+
+        # Check for set membership: "x in X"
+        if self.peek() == "in":
+            self.consume()  # Consume "in"
+            set_variable = self.consume()
+            return SetMembership(token, set_variable)
 
         if self.peek() == "(":  # This is a predicate
             self.consume()  # Consume "("
@@ -132,7 +171,14 @@ class FOParser:
         return Relation(left_operand, operator, right_operand)
 
 
+def parse_som_formula(formula_str: str):
+    tokens = tokenize(formula_str)
+    parser = SOMParser(tokens)
+    return parser.parse_formula()
+
+
+# Keep the original parse_fo_formula for backward compatibility
 def parse_fo_formula(formula_str: str):
     tokens = tokenize(formula_str)
-    parser = FOParser(tokens)
+    parser = SOMParser(tokens)  # Use SOMParser since it's a superset of FOParser
     return parser.parse_formula()

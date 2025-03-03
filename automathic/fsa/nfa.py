@@ -458,9 +458,10 @@ class NonDeterministicFSA:
                 final_result.set_accepting_state(state.id)
 
         # Copy transitions
-        for (src, symbol), dst in result.transitions.items():
-            if src.id < result.num_states and dst.id < result.num_states:
-                final_result.set_transition(src.id, symbol, dst.id)
+        for (src, symbol), dsts in result.transitions.items():
+            for dst in dsts:
+                if src.id < result.num_states and dst.id < result.num_states:
+                    final_result.set_transition(src.id, symbol, dst.id)
 
         return final_result
 
@@ -596,9 +597,10 @@ class NonDeterministicFSA:
                 final_result.set_accepting_state(state.id)
 
         # Copy transitions
-        for (src, symbol), dst in result.transitions.items():
-            if src.id < counter and dst.id < counter:
-                final_result.set_transition(src.id, symbol, dst.id)
+        for (src, symbol), dsts in result.transitions.items():
+            for dst in dsts:
+                if src.id < counter and dst.id < counter:
+                    final_result.set_transition(src.id, symbol, dst.id)
 
         return final_result.trim()
 
@@ -652,12 +654,9 @@ class NonDeterministicFSA:
             result.set_accepting_state(old_to_new[state.id])
 
         # Copy transitions
-        for (src, symbol), dst in self.transitions.items():
-            if isinstance(dst, set):  # NFA case
-                for d in dst:
-                    result.set_transition(old_to_new[src.id], symbol, old_to_new[d.id])
-            else:  # DFA case
-                result.set_transition(old_to_new[src.id], symbol, old_to_new[dst.id])
+        for (src, symbol), dsts in self.transitions.items():
+            for d in dsts:
+                result.set_transition(old_to_new[src.id], symbol, old_to_new[d.id])
 
         # Update the number of states
         result.num_states = new_id
@@ -784,6 +783,75 @@ class NonDeterministicFSA:
         # This is true if the resulting automaton has no reachable accepting states
         minimized = union.trim()
         return len(minimized.accepting_states) == 0
+
+    def union(self, other):
+        """
+        Create a new NFA that accepts the union of the languages of self and other.
+
+        The union construction:
+        1. Creates a new initial state with epsilon transitions to the initial states of both NFAs
+        2. Combines the states and transitions of both NFAs
+
+        Args:
+            other: Another NonDeterministicFSA
+
+        Returns:
+            A new NonDeterministicFSA that accepts the union of the languages
+        """
+        if set(self.alphabet) != set(other.alphabet):
+            raise ValueError("Automata must have the same alphabet for union")
+
+        # Create a new NFA with combined states
+        num_states = self.num_states + other.num_states + 1
+        result = NonDeterministicFSA(num_states, self.alphabet)
+
+        # Create a new initial state
+        result.set_initial_state(0)
+
+        # Copy states from self, shifting IDs by 1
+        for i in range(self.num_states):
+            state_obj = self.states[i]
+            new_id = i + 1
+            result.states[new_id] = State(
+                new_id, origin=state_obj.origin, label=state_obj.label
+            )
+            if state_obj in self.accepting_states:
+                result.set_accepting_state(new_id)
+
+        # Copy states from other, shifting IDs by self.num_states + 1
+        offset = self.num_states + 1
+        for i in range(other.num_states):
+            state_obj = other.states[i]
+            new_id = i + offset
+            result.states[new_id] = State(
+                new_id, origin=state_obj.origin, label=state_obj.label
+            )
+            if state_obj in other.accepting_states:
+                result.set_accepting_state(new_id)
+
+        # Add epsilon transitions from the new initial state to the initial states of both NFAs
+        if self.initial_state is not None:
+            result.set_transition(0, "", self.initial_state.id + 1)
+        if other.initial_state is not None:
+            result.set_transition(0, "", other.initial_state.id + offset)
+
+        # Copy transitions from self, shifting IDs by 1
+        for (src, symbol), destinations in self.transitions.items():
+            if isinstance(destinations, set):
+                for dst in destinations:
+                    result.set_transition(src.id + 1, symbol, dst.id + 1)
+            else:
+                result.set_transition(src.id + 1, symbol, destinations.id + 1)
+
+        # Copy transitions from other, shifting IDs by offset
+        for (src, symbol), destinations in other.transitions.items():
+            if isinstance(destinations, set):
+                for dst in destinations:
+                    result.set_transition(src.id + offset, symbol, dst.id + offset)
+            else:
+                result.set_transition(src.id + offset, symbol, destinations.id + offset)
+
+        return result
 
     def __str__(self):
         return self.ascii()
