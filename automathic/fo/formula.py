@@ -125,6 +125,7 @@ class SOMFormula:
         ):
             # For second-order quantifiers, include the quantified variable and variables from subformula
             return {self.set_variable}.union(self.subformula.get_set_variables())
+            # return self.subformula.get_set_variables()
 
         else:
             # Base formulas have no set variables
@@ -561,6 +562,27 @@ class SetMembership(SOMFormula):
 
     def _to_ascii_helper(self, lines, indent):
         lines.append(" " * indent + self.to_string())
+
+    def __hash__(self):
+        return hash(str(self))
+
+    def __eq__(self, other):
+        return (
+            self.position_variable == other.position_variable
+            and self.set_variable == other.set_variable
+        )
+
+    def __lt__(self, other):
+        return (self.set_variable, self.position_variable) < (
+            other.set_variable,
+            other.position_variable,
+        )
+
+    def __str__(self):
+        return f"{self.set_variable}({self.position_variable})"
+
+    def __repr__(self):
+        return self.__str__()
 
     def to_html(self):
         return f'<div class="formula-node"><span class="node-content node-set-membership">{self.position_variable} ∈ {self.set_variable}</span></div>'

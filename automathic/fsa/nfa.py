@@ -135,11 +135,8 @@ class NonDeterministicFSA:
             symbol: Alphabet symbol triggering the transition
             dst_id (int): Destination state ID
         """
-        if src_id >= len(self.states) or dst_id >= len(self.states):
-            raise ValueError("State index out of bounds")
 
-        src_state = self.states[src_id]
-        dst_state = self.states[dst_id]
+        src_state, dst_state = self._get_state_obj(src_id), self._get_state_obj(dst_id)
 
         # If this transition key doesn't exist yet, create a new set
         if (src_state, symbol) not in self.transitions:
@@ -240,6 +237,12 @@ class NonDeterministicFSA:
 
         # Check if any current state is accepting
         return any(state in self.accepting_states for state in current_states)
+
+    def to_som(self):
+        """Convert the FSA to a SOM formula."""
+        from automathic.fo.translator import convert_fsa_to_som
+
+        return convert_fsa_to_som(self)
 
     def trim(self):
         """
@@ -1023,8 +1026,8 @@ class NonDeterministicFSA:
             for d, values in to.items():
                 # Use state ID for edge definition
                 dest_state = self.states[d] if isinstance(d, int) else d
-                if len(values) > 6:
-                    values = values[0:3] + [". . ."]
+                # if len(values) > 6:
+                #     values = values[0:3] + [". . ."]
                 edge_label = ", ".join(values)
                 ret.append(
                     f'g.setEdge("{q.id}", "{dest_state.id}", {{ '

@@ -137,20 +137,31 @@ class SOMParser:
     def parse_atomic_formula(self):
         token = self.consume()
 
-        # Check for set membership: "x in X"
+        # Check for set membership: "x in X" format
         if self.peek() == "in":
             self.consume()  # Consume "in"
             set_variable = self.consume()
             return SetMembership(token, set_variable)
 
-        if self.peek() == "(":  # This is a predicate
+        if (
+            self.peek() == "("
+        ):  # This is either a predicate or set membership with X(x) syntax
             self.consume()  # Consume "("
             var = self.consume()
             if self.peek() == ")":
                 self.consume()  # Consume ")"
-            if token[:1] == "Q":
+
+            # Check if token is a set variable (starts with uppercase)
+            if (
+                token[0].isupper() and len(token) == 1
+            ):  # Set variables are single uppercase letters
+                # This is X(x) set membership syntax
+                return SetMembership(var, token)
+            elif token[:1] == "Q":
+                # This is a symbol predicate like Qa(x)
                 return SymbolPredicate(token[:1], var, token[1:])
             else:
+                # Regular predicate like P(x)
                 return Predicate(token, var)
         else:
             # This might be a variable in a relation
