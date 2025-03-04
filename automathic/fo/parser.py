@@ -151,10 +151,11 @@ class SOMParser:
             if self.peek() == ")":
                 self.consume()  # Consume ")"
 
+            assert token[0].isupper()
+
             # Check if token is a set variable (starts with uppercase)
-            if (
-                token[0].isupper() and len(token) == 1
-            ):  # Set variables are single uppercase letters
+            if token[0].isupper() and token[0] in ["X", "Y", "Z", "W"]:
+                # Set variables are single uppercase letters
                 # This is X(x) set membership syntax
                 return SetMembership(var, token)
             elif token[:1] == "Q":

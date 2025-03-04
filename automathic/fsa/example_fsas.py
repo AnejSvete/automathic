@@ -156,17 +156,102 @@ def create_contains_a_followed_by_b_automaton():
     return fsa
 
 
-# Example usage in a notebook:
-if __name__ == "__main__":
-    print("Creating example FSAs...")
-    substring_fsa = create_substring_abc_automaton()
-    print(substring_fsa)
+def create_even_parity_automaton():
+    """
+    Creates an FSA that recognizes binary strings with even parity (even number of 1s).
 
-    end_with_fsa = create_end_with_ab_automaton()
-    print(end_with_fsa)
+    States:
+    - 0: Initial state (even number of 1s seen so far)
+    - 1: Odd number of 1s seen so far
 
-    divisible_fsa = create_divisible_by_3_automaton()
-    print(divisible_fsa)
+    Returns:
+        FiniteStateAutomaton: The automaton accepting strings with even parity
+    """
+    alphabet = ["0", "1"]
+    fsa = FiniteStateAutomaton(2, alphabet)
 
-    follows_fsa = create_contains_a_followed_by_b_automaton()
-    print(follows_fsa)
+    # State 0 transitions (even parity)
+    fsa.set_transition(0, "0", 0)  # 0 doesn't change parity
+    fsa.set_transition(0, "1", 1)  # 1 flips parity to odd
+
+    # State 1 transitions (odd parity)
+    fsa.set_transition(1, "0", 1)  # 0 doesn't change parity
+    fsa.set_transition(1, "1", 0)  # 1 flips parity back to even
+
+    # Set initial and accepting states
+    fsa.set_initial_state(0)
+    fsa.set_accepting_state(0)  # Only accept if we've seen an even number of 1s
+
+    # Set state labels for clarity
+    fsa.set_state_label(0, "Even")
+    fsa.set_state_label(1, "Odd")
+
+    return fsa
+
+
+def create_even_length_automaton():
+    """
+    Creates an FSA that recognizes strings of even length over any alphabet.
+
+    States:
+    - 0: Initial state (even length seen so far - including empty string)
+    - 1: Odd length seen so far
+
+    Returns:
+        FiniteStateAutomaton: The automaton accepting strings of even length
+    """
+    alphabet = ["a", "b", "c"]  # Can be any alphabet
+    fsa = FiniteStateAutomaton(2, alphabet)
+
+    # Each symbol read toggles between even and odd length
+    for symbol in alphabet:
+        # State 0 transitions (even length)
+        fsa.set_transition(0, symbol, 1)  # Any symbol makes length odd
+
+        # State 1 transitions (odd length)
+        fsa.set_transition(1, symbol, 0)  # Any symbol makes length even again
+
+    # Set initial and accepting states
+    fsa.set_initial_state(0)
+    fsa.set_accepting_state(0)  # Accept only strings of even length
+
+    # Set state labels for clarity
+    fsa.set_state_label(0, "Even")
+    fsa.set_state_label(1, "Odd")
+
+    return fsa
+
+
+def create_even_number_of_as_automaton():
+    """
+    Creates an FSA that recognizes strings with an even number of 'a's.
+
+    States:
+    - 0: Initial state (even number of 'a's seen so far)
+    - 1: Odd number of 'a's seen so far
+
+    Returns:
+        FiniteStateAutomaton: The automaton accepting strings with even number of 'a's
+    """
+    alphabet = ["a", "b", "c"]  # Can include any symbols besides 'a'
+    fsa = FiniteStateAutomaton(2, alphabet)
+
+    # State 0 transitions (even number of 'a's)
+    fsa.set_transition(0, "a", 1)  # 'a' makes count odd
+    fsa.set_transition(0, "b", 0)  # Other symbols don't affect count
+    fsa.set_transition(0, "c", 0)
+
+    # State 1 transitions (odd number of 'a's)
+    fsa.set_transition(1, "a", 0)  # 'a' makes count even again
+    fsa.set_transition(1, "b", 1)  # Other symbols don't affect count
+    fsa.set_transition(1, "c", 1)
+
+    # Set initial and accepting states
+    fsa.set_initial_state(0)
+    fsa.set_accepting_state(0)  # Only accept if we've seen an even number of 'a's
+
+    # Set state labels for clarity
+    fsa.set_state_label(0, "Even-a")
+    fsa.set_state_label(1, "Odd-a")
+
+    return fsa

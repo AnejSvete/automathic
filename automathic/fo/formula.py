@@ -368,6 +368,124 @@ class SOMFormula:
         else:
             raise ValueError(f"Unsupported formula type: {type(self).__name__}")
 
+    def simplify(self):
+        """
+        Simplifies a formula in SOM by applying basic logical transformations
+        while maintaining the SOM syntax restrictions (existential quantifiers,
+        conjunctions, negations, and less-than relations).
+
+        This includes:
+        - Eliminating double negations
+        - Simplifying Boolean tautologies and contradictions
+        - Simplifying redundant conjunctions
+        - Handling set membership predicates
+
+        Returns:
+            SOMFormula: A simplified equivalent formula
+        """
+        if (
+            isinstance(self, Predicate)
+            or isinstance(self, Relation)
+            or isinstance(self, SetMembership)
+        ):
+            # Atomic formulas remain unchanged
+            return self
+
+        elif isinstance(self, Negation):
+            # First simplify the subformula
+            simplified_subformula = self.subformula.simplify()
+
+            # Eliminate double negation: ¬¬φ ≡ φ
+            if isinstance(simplified_subformula, Negation):
+                return simplified_subformula.subformula
+
+            # Apply negation to the simplified subformula
+            return Negation(simplified_subformula)
+
+        elif isinstance(self, Conjunction):
+            # Simplify both sides
+            left_simplified = self.left.simplify()
+            right_simplified = self.right.simplify()
+
+            # Check if either side is a contradiction, which makes the whole conjunction false
+            # Note: We would need a representation for False, which isn't defined yet
+
+            # Eliminate redundant conjunctions: A ∧ A ≡ A
+            if left_simplified.to_string() == right_simplified.to_string():
+                return left_simplified
+
+            # Otherwise, keep the simplified conjunction
+            return Conjunction(left_simplified, right_simplified)
+
+        elif isinstance(self, Disjunction):
+            # In SOM, disjunction is represented as ¬(¬A ∧ ¬B)
+            # Simplify both sides first
+            left_simplified = self.left.simplify()
+            right_simplified = self.right.simplify()
+
+            # Convert disjunction to the SOM form and simplify again
+            return Negation(
+                Conjunction(Negation(left_simplified), Negation(right_simplified))
+            ).simplify()
+
+        elif isinstance(self, ExistentialQuantifier):
+            # Simplify the subformula
+            simplified_subformula = self.subformula.simplify()
+
+            # Check if the variable is actually used in the subformula
+            if self.variable not in simplified_subformula.get_variables():
+                # If the variable isn't used, we can remove the quantifier
+                return simplified_subformula
+
+            return ExistentialQuantifier(self.variable, simplified_subformula)
+
+        elif isinstance(self, UniversalQuantifier):
+            # In SOM, universal quantifiers are represented as ¬∃x.¬φ
+            # First simplify the subformula
+            simplified_subformula = self.subformula.simplify()
+
+            # Check if the variable is actually used in the subformula
+            if self.variable not in simplified_subformula.get_variables():
+                # If the variable isn't used, we can remove the quantifier
+                return simplified_subformula
+
+            # Convert to SOM form and simplify again
+            negated_subformula = Negation(simplified_subformula)
+            existential = ExistentialQuantifier(self.variable, negated_subformula)
+            return Negation(existential).simplify()
+
+        elif isinstance(self, ExistentialSetQuantifier):
+            # Simplify the subformula
+            simplified_subformula = self.subformula.simplify()
+
+            # Check if the set variable is actually used in the subformula
+            if self.set_variable not in simplified_subformula.get_set_variables():
+                # If the set variable isn't used, we can remove the quantifier
+                return simplified_subformula
+
+            return ExistentialSetQuantifier(self.set_variable, simplified_subformula)
+
+        elif isinstance(self, UniversalSetQuantifier):
+            # In SOM, universal set quantifiers are represented as ¬∃X.¬φ
+            # First simplify the subformula
+            simplified_subformula = self.subformula.simplify()
+
+            # Check if the set variable is actually used in the subformula
+            if self.set_variable not in simplified_subformula.get_set_variables():
+                # If the set variable isn't used, we can remove the quantifier
+                return simplified_subformula
+
+            # Convert to SOM form and simplify again
+            negated_subformula = Negation(simplified_subformula)
+            existential = ExistentialSetQuantifier(
+                self.set_variable, negated_subformula
+            )
+            return Negation(existential).simplify()
+
+        else:
+            # For any unsupported formula type, return as is
+            return self
+
     def to_fsa(self, alphabet=None):
         """
         Convert formula to equivalent Finite State Automaton
@@ -817,86 +935,6 @@ class FOFormula(SOMFormula):
         else:
             # Unknown formula type
             return False
-
-    def simplify(self):
-        """
-        Simplifies a formula in FO[<] by applying basic logical transformations
-        while maintaining the FO[<] syntax restrictions (existential quantifiers,
-        conjunctions, negations, and less-than relations).
-
-        This includes:
-        - Eliminating double negations
-        - Simplifying Boolean tautologies and contradictions
-        - Simplifying redundant conjunctions
-
-        Returns:
-            FOFormula: A simplified equivalent formula
-        """
-        if isinstance(self, Predicate) or isinstance(self, Relation):
-            # Atomic formulas remain unchanged
-            return self
-
-        elif isinstance(self, Negation):
-            # First simplify the subformula
-            simplified_subformula = self.subformula.simplify()
-
-            # Eliminate double negation: ¬¬φ ≡ φ
-            if isinstance(simplified_subformula, Negation):
-                return simplified_subformula.subformula
-
-            # Apply negation to the simplified subformula
-            return Negation(simplified_subformula)
-
-        elif isinstance(self, Conjunction):
-            # Simplify both sides
-            left_simplified = self.left.simplify()
-            right_simplified = self.right.simplify()
-
-            # Check if either side is a contradiction, which makes the whole conjunction false
-            # Note: We would need a representation for False, which isn't defined yet
-
-            # Eliminate redundant conjunctions: A ∧ A ≡ A
-            if left_simplified.to_string() == right_simplified.to_string():
-                return left_simplified
-
-            # Otherwise, keep the simplified conjunction
-            return Conjunction(left_simplified, right_simplified)
-
-        elif isinstance(self, Disjunction):
-            # In FO[<], disjunction is represented as ¬(¬A ∧ ¬B)
-            # Simplify both sides first
-            left_simplified = self.left.simplify()
-            right_simplified = self.right.simplify()
-
-            # Convert disjunction to the FO[<] form and simplify again
-            return Negation(
-                Conjunction(Negation(left_simplified), Negation(right_simplified))
-            ).simplify()
-
-        elif isinstance(self, ExistentialQuantifier):
-            # Simplify the subformula
-            simplified_subformula = self.subformula.simplify()
-
-            # Check if the variable is actually used in the subformula
-            if self.variable not in simplified_subformula.get_variables():
-                # If the variable isn't used, we can remove the quantifier
-                return simplified_subformula
-
-            return ExistentialQuantifier(self.variable, simplified_subformula)
-
-        elif isinstance(self, UniversalQuantifier):
-            # In FO[<], universal quantifiers are represented as ¬∃x.¬φ
-            # First simplify the subformula
-            simplified_subformula = self.subformula.simplify()
-
-            # Convert to FO[<] form and simplify again
-            negated_subformula = Negation(simplified_subformula)
-            existential = ExistentialQuantifier(self.variable, negated_subformula)
-            return Negation(existential).simplify()
-
-        else:
-            # For any unsupported formula type, return as is
-            return self
 
     def to_enf(self):
         """

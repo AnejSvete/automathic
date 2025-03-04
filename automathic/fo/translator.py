@@ -367,6 +367,8 @@ class SOMtoFSA:
         # Handle the different relation types
         if op == "<":
             return self._relation_lt(left, right, V_alphabet, V)
+        elif op == "=":
+            return self._relation_eq(left, right, V_alphabet, V)
         else:
             # Other relations like <=, >, >=, = should be converted to FO[<] first
             # This should not happen if we first normalize the formula
@@ -395,7 +397,7 @@ class SOMtoFSA:
 
         # For every symbol in the enriched alphabet
         for V_symbol in fsa.alphabet:
-            _, vars_at_pos = V_symbol
+            _, vars_at_pos, set_vars_at_pos = V_symbol
 
             if var1 in vars_at_pos and var2 not in vars_at_pos:
                 # Transition to state 1 when var1 is seen and var2 is not
@@ -413,6 +415,44 @@ class SOMtoFSA:
         fsa.set_initial_state(0)
         # Set accepting state
         fsa.set_accepting_state(2)
+
+        # Ensure the FSA obeys variable assignment constraints
+        return self._ensure_V_structure(fsa, V)
+
+    def _relation_eq(self, var1, var2, V_alphabet, V):
+        """
+        Builds an FSA for the relation x = y (var1 position the same as var2 position).
+
+        Args:
+            var1: First variable
+            var2: Second variable
+            V_alphabet: The enriched alphabet
+            V: List of free variables
+
+        Returns:
+            An FSA accepting words where var1 and var2 appear together
+        """
+        fsa = FiniteStateAutomaton(2, V_alphabet)
+
+        # State 0: Initial state, haven't seen either position
+        # State 1: Seen position var1 and var2
+
+        # For every symbol in the enriched alphabet
+        for V_symbol in fsa.alphabet:
+            _, vars_at_pos, set_vars_at_pos = V_symbol
+
+            if var1 in vars_at_pos and var2 in vars_at_pos:
+                # Transition to state 1 when var1 and var2 are seen
+                fsa.set_transition(0, V_symbol, 1)
+            else:
+                # Stay in the same state
+                fsa.set_transition(0, V_symbol, 0)
+                fsa.set_transition(1, V_symbol, 1)
+
+        # Set initial state
+        fsa.set_initial_state(0)
+        # Set accepting state
+        fsa.set_accepting_state(1)
 
         # Ensure the FSA obeys variable assignment constraints
         return self._ensure_V_structure(fsa, V)
@@ -508,7 +548,7 @@ class SOMtoFSA:
         # Convert back to a deterministic FSA and minimize
         return result.trim().determinize().minimize()
 
-    def _construct_V1_structure_fsa(self, V1, V2, V_alphabet):
+    def _construct_V_structure_fsa(self, V1, V2, V_alphabet):
         """
         Construct an FSA that ensures each first-order variable appears exactly once.
 
@@ -555,148 +595,6 @@ class SOMtoFSA:
             for symbol in V_alphabet:
                 fsa.set_transition(0, symbol, 0)
             return fsa
-
-    # def _construct_V2_structure_fsa(self, V1, V2, V_alphabet):
-    #     """
-    #     Construct an FSA that verifies set membership constraints for second-order variables.
-    #     For each set variable X, ensures that X contains a position only if that position
-    #     has the corresponding first-order variable assigned to it.
-
-    #     Args:
-    #         V1: List of first-order variables
-    #         V2: List of set variables
-    #         V_alphabet: The enriched alphabet with (symbol, first-order vars, second-order vars)
-
-    #     Returns:
-    #         An FSA that enforces second-order variable constraints
-    #     """
-    #     # If no variables to enforce constraints for, accept anything
-    #     if not V1 or not V2:
-    #         fsa = FiniteStateAutomaton(1, V_alphabet)
-    #         fsa.set_initial_state(0)
-    #         fsa.set_accepting_state(0)
-    #         for symbol in V_alphabet:
-    #             fsa.set_transition(0, symbol, 0)
-    #         return fsa
-
-    #     # For each variable, construct a sub-automaton that ensures it appears exactly once
-    #     sub_fsas = []
-    #     for var, set_var in product(V1, V2):
-    #         # Create a 2-state FSA: 0 = not seen, 1 = seen
-    #         var_fsa = FiniteStateAutomaton(2, V_alphabet)
-    #         var_fsa.set_initial_state(0)
-    #         var_fsa.set_accepting_state(1)
-
-    #         for V_symbol in V_alphabet:
-    #             symbol, vars_at_pos, set_vars_at_pos = V_symbol
-    #             if var in vars_at_pos and set_var in set_vars_at_pos:
-    #                 # If variable is at this position, transition from not-seen to seen
-    #                 var_fsa.set_transition(0, V_symbol, 1)
-    #                 # Once seen, reject if seen again (no transition from state 1)
-    #             else:
-    #                 # If variable not at this position, stay in current state
-    #                 var_fsa.set_transition(0, V_symbol, 0)
-    #                 var_fsa.set_transition(1, V_symbol, 1)
-
-    #         sub_fsas.append(var_fsa)
-
-    #     # Intersect all the sub-automata to get the final structure enforcer
-    #     if sub_fsas:
-    #         result = sub_fsas[0]
-    #         for i in range(1, len(sub_fsas)):
-    #             result = result.intersect(sub_fsas[i])
-    #         return result
-    #     else:
-    #         # If no first-order variables, create an automaton that accepts anything
-    #         fsa = FiniteStateAutomaton(1, V_alphabet)
-    #         fsa.set_initial_state(0)
-    #         fsa.set_accepting_state(0)
-    #         for symbol in V_alphabet:
-    #             fsa.set_transition(0, symbol, 0)
-    #         return fsa
-
-    # def _construct_V2_structure_fsa(self, V1, V2, V_alphabet):
-    #     """
-    #     Construct an FSA that verifies set membership constraints for second-order variables.
-    #     For each set variable X, ensures that X contains a position only if that position
-    #     has the corresponding first-order variable assigned to it.
-
-    #     Args:
-    #         V1: List of first-order variables
-    #         V2: List of set variables
-    #         V_alphabet: The enriched alphabet with (symbol, first-order vars, second-order vars)
-
-    #     Returns:
-    #         An FSA that enforces second-order variable constraints
-    #     """
-    #     # If no variables to enforce constraints for, accept anything
-    #     if not V1 or not V2:
-    #         fsa = FiniteStateAutomaton(1, V_alphabet)
-    #         fsa.set_initial_state(0)
-    #         fsa.set_accepting_state(0)
-    #         for symbol in V_alphabet:
-    #             fsa.set_transition(0, symbol, 0)
-    #         return fsa
-
-    #     # For each variable, construct a sub-automaton that ensures it appears exactly once
-    #     sub_fsas = []
-    #     for var in V2:
-    #         # Create a 2-state FSA: 0 = not seen, 1 = seen
-    #         var_fsa = FiniteStateAutomaton(2, V_alphabet)
-    #         var_fsa.set_initial_state(0)
-    #         var_fsa.set_accepting_state(1)
-
-    #         for V_symbol in V_alphabet:
-    #             symbol, vars_at_pos, set_vars_at_pos = V_symbol
-    #             if var.position_variable in vars_at_pos and var in set_vars_at_pos:
-    #                 # If variable is at this position, transition from not-seen to seen
-    #                 var_fsa.set_transition(0, V_symbol, 1)
-    #                 # Once seen, reject if seen again (no transition from state 1)
-    #             else:
-    #                 # If variable not at this position, stay in current state
-    #                 var_fsa.set_transition(0, V_symbol, 0)
-    #                 var_fsa.set_transition(1, V_symbol, 1)
-
-    #         sub_fsas.append(var_fsa)
-
-    #     # Intersect all the sub-automata to get the final structure enforcer
-    #     if sub_fsas:
-    #         result = sub_fsas[0]
-    #         for i in range(1, len(sub_fsas)):
-    #             result = result.intersect(sub_fsas[i])
-    #         return result
-    #     else:
-    #         # If no first-order variables, create an automaton that accepts anything
-    #         fsa = FiniteStateAutomaton(1, V_alphabet)
-    #         fsa.set_initial_state(0)
-    #         fsa.set_accepting_state(0)
-    #         for symbol in V_alphabet:
-    #             fsa.set_transition(0, symbol, 0)
-    #         return fsa
-
-    def _construct_V_structure_fsa(self, V1, V2, V_alphabet):
-        """
-        Construct an FSA that ensures each first-order variable appears exactly once.
-
-        Args:
-            V1: List of first-order variables
-            V2: List of second-order variables
-            V_alphabet: The enriched alphabet
-
-        Returns:
-            An FSA that enforces first-order variable constraints
-        """
-        # Construct the FSA for first-order variables
-        V1_fsa = self._construct_V1_structure_fsa(V1, V2, V_alphabet)
-
-        # # Construct the FSA for second-order variables
-        # V2_fsa = self._construct_V2_structure_fsa(V1, V2, V_alphabet)
-
-        # Intersect both FSAs to get the final structure enforcer
-        # result = V1_fsa.intersect(V2_fsa)
-
-        return V1_fsa
-        # return result
 
     def _ensure_V_structure(self, fsa, V1, V2=None):
         """
@@ -798,62 +696,269 @@ class FSAToSOM:
         # First ensure the FSA is normalized for conversion
         fsa = fsa.trim().minimize()
 
-        φ_1 = self._construct_φ_1(fsa)
-        φ_2 = self._construct_φ_2(fsa)
-        φ_3 = self._construct_φ_3(fsa)
-        φ_4 = self._construct_φ_4(fsa)
-        φ_5 = self._construct_φ_5(fsa)
+        # Check if the automaton accepts the empty string
+        # (initial state is also an accepting state)
+        accepts_empty = (
+            fsa.initial_state is not None and fsa.initial_state in fsa.accepting_states
+        )
 
-        # final_conjunction = Conjunction(
-        #     Conjunction(Conjunction(Conjunction(φ_1, φ_2), φ_3), φ_4), φ_5
-        # )
-        final_conjunction = Conjunction(Conjunction(φ_1, φ_2), φ_3)
+        # Create set variable quantifiers for each state
+        state_vars = [f"X{state.id}" for state in fsa.states if state is not None]
 
-        return final_conjunction
+        # Build the core formula components
+        φ_1 = self._construct_φ_1(fsa)  # Every position belongs to exactly one state
+        φ_2 = self._construct_φ_2(fsa)  # States are mutually exclusive
+        φ_3 = self._construct_φ_3(fsa)  # Initial state constraint
+        φ_4 = self._construct_φ_4(fsa)  # Transition constraints
+        φ_5 = self._construct_φ_5(fsa)  # Accepting state constraint
+
+        # Combine all constraints with conjunction
+        formula_body = Conjunction(
+            Conjunction(Conjunction(φ_1, φ_2), Conjunction(φ_3, φ_4)), φ_5
+        )
+
+        # Create a formula that's true for the empty string
+        # The formula ∀x.(x ≠ x) is only true for the empty string
+        empty_string_formula = UniversalQuantifier(
+            "x", Negation(Relation("x", "=", "x"))
+        )
+
+        # If the automaton accepts the empty string, we should include it in our formula
+        if accepts_empty:
+            # The formula is: (empty string formula) OR (non-empty string formula)
+            formula_body = Disjunction(empty_string_formula, formula_body)
+
+        # Wrap with existential quantifiers for all state sets
+        result = formula_body
+        for state_var in state_vars:
+            result = ExistentialSetQuantifier(state_var, result)
+
+        return result
 
     def _construct_φ_1(self, fsa):
+        """
+        Construct the formula that ensures every position belongs to exactly one state.
+        This is achieved by stating that for each position, it belongs to at least one state.
 
-        state_sets = [SetMembership(f"X{state.id}", "x1") for state in fsa.states]
+        Combined with φ_2 (mutual exclusion), this ensures exactly one state per position.
+        """
+        # Get all valid states in the FSA
+        valid_states = [state for state in fsa.states if state is not None]
 
-        disjunction = (
-            Disjunction(state_sets[0], state_sets[1])
-            if len(state_sets) > 1
-            else state_sets[0]
-        )
-        for i in range(2, len(state_sets)):
-            disjunction = Disjunction(disjunction, state_sets[i])
+        # Handle empty automaton or no states
+        if not valid_states:
+            # No states means the language is empty
+            # Return a contradiction formula
+            return Conjunction(
+                SetMembership("x1", "X0"), Negation(SetMembership("x1", "X0"))
+            )
 
+        # Create the set membership predicates for each state
+        state_sets = [SetMembership("x1", f"X{state.id}") for state in valid_states]
+
+        # If there's only one state, the disjunction is just that state
+        if len(state_sets) == 1:
+            disjunction = state_sets[0]
+        else:
+            # Create a disjunction of all state memberships
+            disjunction = Disjunction(state_sets[0], state_sets[1])
+            for i in range(2, len(state_sets)):
+                disjunction = Disjunction(disjunction, state_sets[i])
+
+        # For all positions x1, x1 belongs to at least one state
         return UniversalQuantifier("x1", disjunction)
 
     def _construct_φ_2(self, fsa):
+        """
+        Construct the formula that ensures states are mutually exclusive.
+        This means that for each position, it belongs to at most one state.
 
-        state_sets = [SetMembership(f"X{state.id}", "x2") for state in fsa.states]
-        conjunction = Negation(Conjunction(state_sets[0], state_sets[1]))
+        Combined with φ_1, this ensures exactly one state per position.
+        """
+        # Get all valid states in the FSA
+        valid_states = [state for state in fsa.states if state is not None]
+
+        # If no states or only one state, no need for mutual exclusion
+        if len(valid_states) <= 1:
+            # Return a tautology formula - always true
+            return Conjunction(
+                Disjunction(
+                    SetMembership("x2", "X0"), Negation(SetMembership("x2", "X0"))
+                ),
+                Disjunction(
+                    SetMembership("x2", "X0"), Negation(SetMembership("x2", "X0"))
+                ),
+            )
+
+        # Create the set membership predicates for each state
+        state_sets = [SetMembership("x2", f"X{state.id}") for state in valid_states]
+
+        # Build a conjunction of all pairwise exclusions
+        exclusions = []
         for i in range(0, len(state_sets)):
             for j in range(i + 1, len(state_sets)):
-                conjunction = Conjunction(
-                    conjunction,
-                    Negation(Conjunction(state_sets[i], state_sets[j])),
-                )
+                # A position cannot be in both state i and state j
+                exclusions.append(Negation(Conjunction(state_sets[i], state_sets[j])))
 
-        return UniversalQuantifier("x2", conjunction)
+        # Create the full conjunction of all exclusions
+        result = exclusions[0]
+        for i in range(1, len(exclusions)):
+            result = Conjunction(result, exclusions[i])
+
+        # For all positions x2, mutual exclusion of states holds
+        return UniversalQuantifier("x2", result)
 
     def _construct_φ_3(self, fsa):
+        """
+        Construct the formula that ensures the initial position belongs to the initial state.
+        """
+        if fsa.initial_state is None:
+            # If no initial state, return a contradiction
+            return Conjunction(
+                SetMembership("x3", "X0"), Negation(SetMembership("x3", "X0"))
+            )
+
+        # Formula: first position is in initial state
+        # First position is the one with no predecessor
+        first_position = UniversalQuantifier(
+            "x4",
+            Implication(
+                Relation("x4", "<", "x3"),
+                Negation(
+                    Relation("x4", "=", "x4")
+                ),  # Contradiction to ensure x4 doesn't exist
+            ),
+        )
+
         return UniversalQuantifier(
             "x3",
-            UniversalQuantifier(
-                "x4",
-                Implication(
-                    Negation(Relation("x4", "x3+1", "x3")), SetMembership("X0", "x3")
-                ),
+            Implication(
+                first_position, SetMembership("x3", f"X{fsa.initial_state.id}")
             ),
         )
 
     def _construct_φ_4(self, fsa):
-        raise NotImplementedError
+        """
+        Construct the formula that ensures proper transitions between states.
+        This formula expresses: for each position x and y, if x is in state Xq and
+        y is the next position after x with symbol a, then y must be in a state
+        that can be reached from q by reading a.
+        """
+        # For each state and symbol, build a formula for valid transitions
+        formulas = []
+
+        for state in fsa.states:
+            if state is None:
+                continue
+
+            for symbol in fsa.alphabet:
+                # Get all possible transitions from this state with this symbol
+                transitions = fsa.get_transitions(state.id, symbol)
+
+                # Only create a formula if there are transitions
+                if transitions:
+                    # Create a disjunction of all possible next states
+                    next_states = []
+                    for _, dst_id in transitions:
+                        next_states.append(SetMembership("y", f"X{dst_id}"))
+
+                    # If only one next state, no need for disjunction
+                    if len(next_states) == 1:
+                        next_state_formula = next_states[0]
+                    else:
+                        next_state_formula = Disjunction(next_states[0], next_states[1])
+                        for i in range(2, len(next_states)):
+                            next_state_formula = Disjunction(
+                                next_state_formula, next_states[i]
+                            )
+
+                    # The transition rule: if position x is in state Xq and the next position y
+                    # has symbol 'a', then y must be in one of the valid destination states
+                    predicate = SymbolPredicate(f"Q", "y", symbol)
+
+                    # Express that y is the next position after x (x < y and no z such that x < z < y)
+                    next_position = Conjunction(
+                        Relation("x", "<", "y"),
+                        UniversalQuantifier(
+                            "z",
+                            Implication(
+                                Conjunction(
+                                    Relation("x", "<", "z"), Relation("z", "<", "y")
+                                ),
+                                Negation(
+                                    Relation("z", "=", "z")
+                                ),  # Contradiction, meaning no such z exists
+                            ),
+                        ),
+                    )
+
+                    # The full transition formula
+                    transition_formula = Implication(
+                        Conjunction(
+                            SetMembership("x", f"X{state.id}"),  # x is in state q
+                            Conjunction(
+                                next_position,  # y is the next position after x
+                                predicate,  # y has symbol 'a'
+                            ),
+                        ),
+                        next_state_formula,  # y is in a valid next state
+                    )
+
+                    formulas.append(transition_formula)
+
+        # Combine all transition formulas with conjunction
+        if not formulas:
+            # If no transitions, use a tautology (always true)
+            return Conjunction(
+                Disjunction(
+                    SetMembership("x", "X0"), Negation(SetMembership("x", "X0"))
+                ),
+                Disjunction(
+                    SetMembership("x", "X0"), Negation(SetMembership("x", "X0"))
+                ),
+            )
+
+        result = formulas[0]
+        for i in range(1, len(formulas)):
+            result = Conjunction(result, formulas[i])
+
+        # Quantify over both positions x and y
+        return UniversalQuantifier("x", UniversalQuantifier("y", result))
 
     def _construct_φ_5(self, fsa):
-        raise NotImplementedError
+        """
+        Construct the formula that ensures accepting states.
+        This formula expresses: the last position must be in an accepting state.
+        """
+        accepting_states = []
+
+        for state in fsa.accepting_states:
+            accepting_states.append(SetMembership("x8", f"X{state.id}"))
+
+        # If no accepting states, the language is empty
+        if not accepting_states:
+            return Negation(SetMembership("x8", "X0"))
+
+        # Create a disjunction of all accepting states
+        if len(accepting_states) == 1:
+            accepting_formula = accepting_states[0]
+        else:
+            accepting_formula = Disjunction(accepting_states[0], accepting_states[1])
+            for i in range(2, len(accepting_states)):
+                accepting_formula = Disjunction(accepting_formula, accepting_states[i])
+
+        # The last position is the one with no successor
+        last_position = UniversalQuantifier(
+            "x9",
+            Implication(
+                Relation("x8", "<", "x9"),
+                Negation(
+                    Relation("x9", "=", "x9")
+                ),  # This is a contradiction, meaning x9 doesn't exist
+            ),
+        )
+
+        return UniversalQuantifier("x8", Implication(last_position, accepting_formula))
 
 
 def convert_fsa_to_som(fsa):
