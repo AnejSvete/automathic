@@ -5,10 +5,10 @@ from automathic.fo.parser import parse_fo_formula
 from automathic.fo.translator import convert_fo_to_fsa
 
 
-class TestFOtoFSA(unittest.TestCase):
+class TestSOMtoFSA(unittest.TestCase):
     def test_strings_that_start_with_a_and_end_with_b(self):
         # φ_0: Strings that start with a and end with b
-        automaton = convert_fo_to_fsa(parse_fo_formula(φ_0).to_fo_less().simplify())
+        automaton = convert_fo_to_fsa(parse_fo_formula(φ_0).to_basic_form().simplify())
 
         # Strings that should be accepted
         self.assertTrue(automaton.accepts("ab"))
@@ -27,7 +27,7 @@ class TestFOtoFSA(unittest.TestCase):
     def test_strings_that_start_with_a(self):
         # φ_1: Strings that start with a
         automaton = convert_fo_to_fsa(
-            parse_fo_formula(φ_1).to_fo_less().simplify(), alphabet=["a", "b"]
+            parse_fo_formula(φ_1).to_basic_form().simplify(), alphabet=["a", "b"]
         )
 
         # Strings that should be accepted
@@ -45,7 +45,7 @@ class TestFOtoFSA(unittest.TestCase):
     def test_strings_that_end_with_b(self):
         # φ_2: Strings that end with b
         automaton = convert_fo_to_fsa(
-            parse_fo_formula(φ_2).to_fo_less().simplify(), alphabet=["a", "b"]
+            parse_fo_formula(φ_2).to_basic_form().simplify(), alphabet=["a", "b"]
         )
 
         # Strings that should be accepted
@@ -62,7 +62,7 @@ class TestFOtoFSA(unittest.TestCase):
 
     def test_every_a_immediately_followed_by_b(self):
         # φ_3: Every a is immediately followed by b
-        automaton = convert_fo_to_fsa(parse_fo_formula(φ_3).to_fo_less().simplify())
+        automaton = convert_fo_to_fsa(parse_fo_formula(φ_3).to_basic_form().simplify())
 
         # Strings that should be accepted
         self.assertTrue(automaton.accepts(""))
@@ -80,7 +80,7 @@ class TestFOtoFSA(unittest.TestCase):
     def test_no_a_immediately_followed_by_a(self):
         # φ_4: No a is immediately followed by another a
         automaton = convert_fo_to_fsa(
-            parse_fo_formula(φ_4).to_fo_less().simplify(), alphabet=["a", "b"]
+            parse_fo_formula(φ_4).to_basic_form().simplify(), alphabet=["a", "b"]
         )
 
         # Strings that should be accepted
@@ -101,7 +101,7 @@ class TestFOtoFSA(unittest.TestCase):
     def test_exactly_one_a(self):
         # φ_5: Strings with exactly one a
         automaton = convert_fo_to_fsa(
-            parse_fo_formula(φ_5).to_fo_less().simplify(), alphabet=["a", "b"]
+            parse_fo_formula(φ_5).to_basic_form().simplify(), alphabet=["a", "b"]
         )
 
         # Strings that should be accepted
@@ -120,7 +120,7 @@ class TestFOtoFSA(unittest.TestCase):
 
     def test_every_a_preceded_by_b(self):
         # φ_6: Every a is preceded by a b
-        automaton = convert_fo_to_fsa(parse_fo_formula(φ_6).to_fo_less().simplify())
+        automaton = convert_fo_to_fsa(parse_fo_formula(φ_6).to_basic_form().simplify())
 
         # Strings that should be accepted
         self.assertTrue(automaton.accepts(""))
@@ -139,7 +139,7 @@ class TestFOtoFSA(unittest.TestCase):
 
     def test_alternating_a_b_starting_with_a(self):
         # φ_7: Strings where a and b alternate, starting with a
-        automaton = convert_fo_to_fsa(parse_fo_formula(φ_7).to_fo_less().simplify())
+        automaton = convert_fo_to_fsa(parse_fo_formula(φ_7).to_basic_form().simplify())
 
         # Strings that should be accepted
         self.assertTrue(automaton.accepts("a"))

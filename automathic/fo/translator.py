@@ -694,7 +694,7 @@ class FSAToSOM:
             A SOMFormula equivalent to the automaton
         """
         # First ensure the FSA is normalized for conversion
-        fsa = fsa.trim().minimize()
+        # fsa = fsa.trim().minimize()
 
         # Check if the automaton accepts the empty string
         # (initial state is also an accepting state)
@@ -716,17 +716,22 @@ class FSAToSOM:
         formula_body = Conjunction(
             Conjunction(Conjunction(φ_1, φ_2), Conjunction(φ_3, φ_4)), φ_5
         )
+        # formula_body = φ_5
 
         # Create a formula that's true for the empty string
         # The formula ∀x.(x ≠ x) is only true for the empty string
         empty_string_formula = UniversalQuantifier(
-            "x", Negation(Relation("x", "=", "x"))
+            "x0", Negation(Relation("x0", "=", "x0"))
         )
+        nonepty_string_formula = ExistentialQuantifier("x0", Relation("x0", "=", "x0"))
 
         # If the automaton accepts the empty string, we should include it in our formula
         if accepts_empty:
             # The formula is: (empty string formula) OR (non-empty string formula)
             formula_body = Disjunction(empty_string_formula, formula_body)
+        else:
+            # If the automaton doesn't accept the empty string, we only need the non-empty formula
+            formula_body = Conjunction(nonepty_string_formula, formula_body)
 
         # Wrap with existential quantifiers for all state sets
         result = formula_body
@@ -781,14 +786,7 @@ class FSAToSOM:
         # If no states or only one state, no need for mutual exclusion
         if len(valid_states) <= 1:
             # Return a tautology formula - always true
-            return Conjunction(
-                Disjunction(
-                    SetMembership("x2", "X0"), Negation(SetMembership("x2", "X0"))
-                ),
-                Disjunction(
-                    SetMembership("x2", "X0"), Negation(SetMembership("x2", "X0"))
-                ),
-            )
+            return UniversalQuantifier("x2", Relation("x2", "=", "x2"))
 
         # Create the set membership predicates for each state
         state_sets = [SetMembership("x2", f"X{state.id}") for state in valid_states]
@@ -822,12 +820,7 @@ class FSAToSOM:
         # First position is the one with no predecessor
         first_position = UniversalQuantifier(
             "x4",
-            Implication(
-                Relation("x4", "<", "x3"),
-                Negation(
-                    Relation("x4", "=", "x4")
-                ),  # Contradiction to ensure x4 doesn't exist
-            ),
+            Relation("x4", ">=", "x3"),
         )
 
         return UniversalQuantifier(
@@ -840,125 +833,140 @@ class FSAToSOM:
     def _construct_φ_4(self, fsa):
         """
         Construct the formula that ensures proper transitions between states.
-        This formula expresses: for each position x and y, if x is in state Xq and
-        y is the next position after x with symbol a, then y must be in a state
-        that can be reached from q by reading a.
+        This formula properly constrains both allowed and forbidden transitions.
         """
-        # For each state and symbol, build a formula for valid transitions
-        formulas = []
 
-        for state in fsa.states:
-            if state is None:
-                continue
+        pair_formulas = []
+        # Process each pair of states in the FSA
+        for i in range(0, len(fsa.states)):
+            for j in range(0, len(fsa.states)):
+                # Build a formula for this state that covers all possible symbols
 
-            for symbol in fsa.alphabet:
-                # Get all possible transitions from this state with this symbol
-                transitions = fsa.get_transitions(state.id, symbol)
+                transitions = fsa.get_transitions_between(i, j)
 
-                # Only create a formula if there are transitions
+                # Symbol predicate for this position
                 if transitions:
-                    # Create a disjunction of all possible next states
-                    next_states = []
-                    for _, dst_id in transitions:
-                        next_states.append(SetMembership("y", f"X{dst_id}"))
+                    # Create a disjunction of all valid next states
+                    symbol_preds = []
+                    for symbol in transitions:
+                        symbol_preds.append(SymbolPredicate("Q", "x5", symbol))
 
-                    # If only one next state, no need for disjunction
-                    if len(next_states) == 1:
-                        next_state_formula = next_states[0]
+                    # If only one next state, use it directly
+                    if len(symbol_preds) == 1:
+                        symbol_pred = symbol_preds[0]
                     else:
-                        next_state_formula = Disjunction(next_states[0], next_states[1])
-                        for i in range(2, len(next_states)):
-                            next_state_formula = Disjunction(
-                                next_state_formula, next_states[i]
-                            )
+                        # Create a disjunction of all next states
+                        symbol_pred = Disjunction(symbol_preds[0], symbol_preds[1])
+                        for k in range(2, len(symbol_preds)):
+                            symbol_pred = Disjunction(symbol_pred, symbol_preds[k])
 
-                    # The transition rule: if position x is in state Xq and the next position y
-                    # has symbol 'a', then y must be in one of the valid destination states
-                    predicate = SymbolPredicate(f"Q", "y", symbol)
-
-                    # Express that y is the next position after x (x < y and no z such that x < z < y)
-                    next_position = Conjunction(
-                        Relation("x", "<", "y"),
-                        UniversalQuantifier(
-                            "z",
-                            Implication(
-                                Conjunction(
-                                    Relation("x", "<", "z"), Relation("z", "<", "y")
-                                ),
-                                Negation(
-                                    Relation("z", "=", "z")
-                                ),  # Contradiction, meaning no such z exists
-                            ),
-                        ),
-                    )
-
-                    # The full transition formula
-                    transition_formula = Implication(
-                        Conjunction(
-                            SetMembership("x", f"X{state.id}"),  # x is in state q
+                    # For this symbol: if y has symbol, then y must be in one of valid next states
+                    pair_formulas.append(
+                        Implication(
                             Conjunction(
-                                next_position,  # y is the next position after x
-                                predicate,  # y has symbol 'a'
+                                SetMembership("x5", f"X{i}"),
+                                SetMembership("x6", f"X{j}"),
                             ),
-                        ),
-                        next_state_formula,  # y is in a valid next state
+                            symbol_pred,
+                        )
+                    )
+                else:
+                    # For symbols with no valid transitions, they cannot appear next
+                    # Add a contradiction for this state
+                    pair_formulas.append(
+                        Implication(
+                            Conjunction(
+                                SetMembership("x5", f"X{i}"),
+                                SetMembership("x6", f"X{j}"),
+                            ),
+                            Conjunction(
+                                Negation(SetMembership("x5", f"X{j}")),
+                                SetMembership("x5", f"X{j}"),
+                            ),
+                        )
                     )
 
-                    formulas.append(transition_formula)
-
-        # Combine all transition formulas with conjunction
-        if not formulas:
-            # If no transitions, use a tautology (always true)
-            return Conjunction(
+        # Combine all symbol cases with conjunction
+        if pair_formulas:
+            combined_pairs = pair_formulas[0]
+            for case in pair_formulas[1:]:
+                combined_pairs = Conjunction(combined_pairs, case)
+        else:
+            # If no states with transitions, use a tautology
+            return UniversalQuantifier(
+                "x5",
                 Disjunction(
-                    SetMembership("x", "X0"), Negation(SetMembership("x", "X0"))
-                ),
-                Disjunction(
-                    SetMembership("x", "X0"), Negation(SetMembership("x", "X0"))
+                    SetMembership("x5", "X0"), Negation(SetMembership("x5", "X0"))
                 ),
             )
 
-        result = formulas[0]
-        for i in range(1, len(formulas)):
-            result = Conjunction(result, formulas[i])
-
-        # Quantify over both positions x and y
-        return UniversalQuantifier("x", UniversalQuantifier("y", result))
+        # Quantify over both positions
+        return UniversalQuantifier(
+            "x5",
+            UniversalQuantifier(
+                "x6",
+                Implication(
+                    Relation("x6", "=", "x5+1"),
+                    combined_pairs,
+                ),
+            ),
+        )
 
     def _construct_φ_5(self, fsa):
         """
         Construct the formula that ensures accepting states.
         This formula expresses: the last position must be in an accepting state.
         """
-        accepting_states = []
+        accepting_transitions = []
 
-        for state in fsa.accepting_states:
-            accepting_states.append(SetMembership("x8", f"X{state.id}"))
+        for i in range(0, len(fsa.states)):
+            state_transitions = []
+            for symbol, dst_state in fsa.get_transitions(i):
+                if dst_state in fsa.accepting_states:
+                    state_transitions.append(SymbolPredicate("Q", "x7", symbol))
+
+            state_disjunction = None
+            if state_transitions:
+                # If there are accepting transitions, create a disjunction
+                state_disjunction = state_transitions[0]
+
+                for k in range(1, len(state_transitions)):
+                    state_disjunction = Disjunction(
+                        state_disjunction, state_transitions[k]
+                    )
+
+            else:
+                # If no accepting transitions, add a contradiction
+                state_disjunction = Conjunction(
+                    Negation(SetMembership("x7", f"X{i}")),
+                    SetMembership("x7", f"X{i}"),
+                )
+            accepting_transitions.append(
+                Implication(SetMembership("x7", f"X{i}"), state_disjunction)
+            )
 
         # If no accepting states, the language is empty
-        if not accepting_states:
-            return Negation(SetMembership("x8", "X0"))
+        if not accepting_transitions:
+            return Conjunction(
+                SetMembership("x7", "X0"), Negation(SetMembership("x7", "X0"))
+            )
 
-        # Create a disjunction of all accepting states
-        if len(accepting_states) == 1:
-            accepting_formula = accepting_states[0]
+        # Create a conjunction of all states
+        if len(accepting_transitions) == 1:
+            accepting_formula = accepting_transitions[0]
         else:
-            accepting_formula = Disjunction(accepting_states[0], accepting_states[1])
-            for i in range(2, len(accepting_states)):
-                accepting_formula = Disjunction(accepting_formula, accepting_states[i])
+            accepting_formula = Conjunction(
+                accepting_transitions[0], accepting_transitions[1]
+            )
+            for i in range(2, len(accepting_transitions)):
+                accepting_formula = Conjunction(
+                    accepting_formula, accepting_transitions[i]
+                )
 
         # The last position is the one with no successor
-        last_position = UniversalQuantifier(
-            "x9",
-            Implication(
-                Relation("x8", "<", "x9"),
-                Negation(
-                    Relation("x9", "=", "x9")
-                ),  # This is a contradiction, meaning x9 doesn't exist
-            ),
-        )
+        last_position = UniversalQuantifier("x8", Relation("x8", "<=", "x7"))
 
-        return UniversalQuantifier("x8", Implication(last_position, accepting_formula))
+        return UniversalQuantifier("x7", Implication(last_position, accepting_formula))
 
 
 def convert_fsa_to_som(fsa):

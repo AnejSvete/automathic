@@ -281,24 +281,98 @@ class SOMFormula:
 
     def to_basic_form(self):
         """
-        Convert formula to a simplified form using only negation (¬) and conjunction (∧).
+        Convert formula to a simplified form using only:
+        - negation (¬)
+        - conjunction (∧)
+        - existential quantifiers (∃)
+        - less-than relations (<)
 
         This applies the following transformations:
         - A ∨ B  ≡  ¬(¬A ∧ ¬B)      (De Morgan's law)
         - A → B  ≡  ¬(A ∧ ¬B)       (Implication definition)
         - A ⟺ B  ≡  ¬(¬(¬A ∧ ¬B) ∧ ¬(A ∧ B))  (Equivalence definition)
         - ∀x.A   ≡  ¬∃x.¬A          (Quantifier duality)
+        - x ≤ y  ≡  x < y ∨ x = y   (Relation transformations)
+        - x > y  ≡  y < x           (Relation transformations)
+        - x ≥ y  ≡  y < x ∨ x = y   (Relation transformations)
+        - x = y  ≡  ¬(x < y) ∧ ¬(y < x)  (Relation transformations)
+        - x = y+1 ≡  y < x ∧ ¬∃z.(y < z ∧ z < x)  (Successor relation)
+        - y = x+1 ≡  x < y ∧ ¬∃z.(x < z ∧ z < y)  (Predecessor relation)
 
         Returns:
-            FOFormula: A simplified formula using only ¬, ∧, ∃
+            FOFormula: A simplified formula using only ¬, ∧, ∃, and <
         """
-        if (
-            isinstance(self, Predicate)
-            or isinstance(self, Relation)
-            or isinstance(self, SetMembership)
-        ):
-            # Atomic formulas remain unchanged
+        if isinstance(self, Predicate) or isinstance(self, SetMembership):
+            # Atomic formulas without relations remain unchanged
             return self
+
+        elif isinstance(self, Relation):
+            left, op, right = self.left, self.operator, self.right
+
+            # Check if this is a successor relation (x = y+1)
+            if op == "=" and right.endswith("+1"):
+                base_var = right[:-2]  # Remove "+1"
+                # x = y+1 means: y < x AND NOT EXISTS z: (y < z < x)
+                return Conjunction(
+                    Relation(base_var, "<", left),
+                    Negation(
+                        ExistentialQuantifier(
+                            "z",
+                            Conjunction(
+                                Relation(base_var, "<", "z"), Relation("z", "<", left)
+                            ),
+                        )
+                    ),
+                )
+            # Check if this is a predecessor relation (y = x+1)
+            elif op == "=" and left.endswith("+1"):
+                base_var = left[:-2]  # Remove "+1"
+                # y = x+1 means: x < y AND NOT EXISTS z: (x < z < y)
+                return Conjunction(
+                    Relation(right, "<", base_var),
+                    Negation(
+                        ExistentialQuantifier(
+                            "z",
+                            Conjunction(
+                                Relation(right, "<", "z"), Relation("z", "<", base_var)
+                            ),
+                        )
+                    ),
+                )
+            # Other relations can be directly converted
+            elif op == "<=":
+                # x ≤ y means: x < y OR x = y
+                # where x = y means NOT(x < y) AND NOT(y < x)
+                equal_part = Conjunction(
+                    Negation(Relation(left, "<", right)),
+                    Negation(Relation(right, "<", left)),
+                )
+                return Disjunction(
+                    Relation(left, "<", right), equal_part
+                ).to_basic_form()
+            elif op == ">=":
+                # x ≥ y means: y < x OR x = y
+                equal_part = Conjunction(
+                    Negation(Relation(left, "<", right)),
+                    Negation(Relation(right, "<", left)),
+                )
+                return Disjunction(
+                    Relation(right, "<", left), equal_part
+                ).to_basic_form()
+            elif op == ">":
+                # x > y means: y < x
+                return Relation(right, "<", left)
+            elif op == "=":
+                # x = y means: NOT(x < y) AND NOT(y < x)
+                return Conjunction(
+                    Negation(Relation(left, "<", right)),
+                    Negation(Relation(right, "<", left)),
+                )
+            elif op == "<":
+                # Already in canonical form
+                return self
+            else:
+                raise ValueError(f"Unsupported operator: {op}")
 
         elif isinstance(self, Negation):
             # Apply negation to the simplified subformula
@@ -592,72 +666,82 @@ class SOMFormula:
     def _repr_html_(self):
         """Special method for Jupyter notebook HTML display"""
         css = """
-        <style>
-        .formula-tree {
-            font-family: 'Consolas', 'Courier New', monospace;
-            line-height: 1.4;
-        }
-        .formula-node {
-            position: relative;
-            margin: 2px 0;
-        }
-        .node-content {
-            display: inline-block;
-            padding: 2px 6px;
-            border-radius: 3px;
-        }
-        .node-operator {
-            font-weight: bold;
-        }
-        .node-quantifier {
-            background-color: #e6f3ff;
-            color: #0066cc;
-            font-weight: bold;
-        }
-        .node-set-quantifier {
-            background-color: #e6ffff;
-            color: #006666;
-            font-weight: bold;
-        }
-        .node-conjunction {
-            background-color: #fff0e6;
-            color: #cc6600;
-            font-weight: bold;
-        }
-        .node-disjunction {
-            background-color: #fff0e6;
-            color: #cc6600;
-            font-weight: bold;
-        }
-        .node-negation {
-            background-color: #ffe6e6;
-            color: #cc0000;
-            font-weight: bold;
-        }
-        .node-predicate {
-            background-color: #e6ffe6;
-            color: #006600;
-        }
-        .node-relation {
-            background-color: #f9f9f9;
-            color: #333333;
-        }
-        .node-set-membership {
-            background-color: #e6e6ff;
-            color: #000066;
-        }
-        .node-children {
-            margin-left: 20px;
-            padding-left: 10px;
-            border-left: 1px solid #ccc;
-        }
-        .tree-line {
-            color: #999;
-            margin-right: 5px;
-            font-size: 0.9em;
-        }
-        </style>
-        """
+            <style>
+            .formula-tree {
+                font-family: 'Consolas', 'Courier New', monospace;
+                line-height: 1.4;
+            }
+            .formula-node {
+                position: relative;
+                margin: 2px 0;
+            }
+            .node-content {
+                display: inline-block;
+                padding: 2px 6px;
+                border-radius: 3px;
+            }
+            .node-operator {
+                font-weight: bold;
+            }
+            .node-quantifier {
+                background-color: #e6f3ff;
+                color: #0066cc;
+                font-weight: bold;
+            }
+            .node-set-quantifier {
+                background-color: #e6ffff;
+                color: #006666;
+                font-weight: bold;
+            }
+            .node-conjunction {
+                background-color: #fff0e6;
+                color: #cc6600;
+                font-weight: bold;
+            }
+            .node-disjunction {
+                background-color: #fff0e6;
+                color: #cc6600;
+                font-weight: bold;
+            }
+            .node-implication {
+                background-color: #f0e6ff;
+                color: #6600cc;
+                font-weight: bold;
+            }
+            .node-equivalence {
+                background-color: #e6f0ff;
+                color: #0066cc;
+                font-weight: bold;
+            }
+            .node-negation {
+                background-color: #ffe6e6;
+                color: #cc0000;
+                font-weight: bold;
+            }
+            .node-predicate {
+                background-color: #e6ffe6;
+                color: #006600;
+            }
+            .node-relation {
+                background-color: #f9f9f9;
+                color: #333333;
+            }
+            .node-set-membership {
+                background-color: #e6e6ff;
+                color: #000066;
+            }
+            .node-children {
+                margin-left: 20px;
+                padding-left: 10px;
+                border-left: 1px solid #ccc;
+            }
+            .tree-line {
+                color: #999;
+                margin-right: 5px;
+                font-size: 0.9em;
+            }
+            </style>
+            """
         return css + f'<div class="formula-tree">{self.to_html()}</div>'
 
     def to_html(self):
@@ -774,167 +858,6 @@ class FOFormula(SOMFormula):
         - "There exists a position with symbol 'a'": ∃x.Qa(x)
         - "Every 'a' is followed by a 'b'": ∀x.(Qa(x) → ∃y.(x < y ∧ Qb(y)))
     """
-
-    def to_fo_less(self):
-        """
-        Convert a formula into one that only uses the < relation and existential quantifiers
-        (canonical form for FO[<]).
-
-        FO[<] is the fragment of first-order logic with:
-        - Only the less-than relation (<) for position comparisons
-        - Existential quantifiers (∃)
-        - Boolean operations (conjunction, negation)
-
-        This method transforms formulas with other relations (<=, >=, >, =)
-        and universal quantifiers into equivalent FO[<] formulas.
-
-        Returns:
-            FOFormula: An equivalent formula in FO[<] form
-        """
-        if isinstance(self, Relation):
-            left, op, right = self.left, self.operator, self.right
-
-            # Check if this is a successor relation (x = y+1)
-            if op == "=" and right.endswith("+1"):
-                base_var = right[:-2]  # Remove "+1"
-                # x = y+1 means: y < x AND NOT EXISTS z: (y < z < x)
-                # Rewrite as: y < x AND EXISTS z: NOT(y < z AND z < x)
-                return Conjunction(
-                    Relation(base_var, "<", left),
-                    Negation(
-                        ExistentialQuantifier(
-                            "z",
-                            Conjunction(
-                                Relation(base_var, "<", "z"), Relation("z", "<", left)
-                            ),
-                        )
-                    ),
-                )
-            # Check if this is a predecessor relation (y = x+1)
-            elif op == "=" and left.endswith("+1"):
-                base_var = left[:-2]  # Remove "+1"
-                # y = x+1 means: x < y AND NOT EXISTS z: (x < z < y)
-                # Rewrite as: x < y AND EXISTS z: NOT(x < z AND z < y)
-                return Conjunction(
-                    Relation(right, "<", base_var),
-                    Negation(
-                        ExistentialQuantifier(
-                            "z",
-                            Conjunction(
-                                Relation(right, "<", "z"), Relation("z", "<", base_var)
-                            ),
-                        )
-                    ),
-                )
-            # Other relations can be directly converted
-            elif op == "<=":
-                # x ≤ y means: x < y OR x = y
-                # where x = y means NOT(x < y) AND NOT(y < x)
-                return Disjunction(
-                    Relation(left, "<", right),
-                    Conjunction(
-                        Negation(Relation(left, "<", right)),
-                        Negation(Relation(right, "<", left)),
-                    ),
-                )
-            elif op == ">=":
-                # x ≥ y means: y < x OR x = y
-                return Disjunction(
-                    Relation(right, "<", left),
-                    Conjunction(
-                        Negation(Relation(left, "<", right)),
-                        Negation(Relation(right, "<", left)),
-                    ),
-                )
-            elif op == ">":
-                # x > y means: y < x
-                return Relation(right, "<", left)
-            elif op == "=":
-                # x = y means: NOT(x < y) AND NOT(y < x)
-                return Conjunction(
-                    Negation(Relation(left, "<", right)),
-                    Negation(Relation(right, "<", left)),
-                )
-            elif op == "<":
-                # Already in canonical form
-                return self
-            else:
-                raise ValueError(f"Unsupported operator: {op}")
-
-        # Recursively transform subformulas
-        elif isinstance(self, Negation):
-            return Negation(self.subformula.to_fo_less())
-        elif isinstance(self, Conjunction):
-            return Conjunction(self.left.to_fo_less(), self.right.to_fo_less())
-        elif isinstance(self, Disjunction):
-            # For FO[<], disjunction is expressed using De Morgan's laws:
-            # A ∨ B ≡ ¬(¬A ∧ ¬B)
-            return Negation(
-                Conjunction(
-                    Negation(self.left.to_fo_less()), Negation(self.right.to_fo_less())
-                )
-            )
-        elif isinstance(self, ExistentialQuantifier):
-            return ExistentialQuantifier(self.variable, self.subformula.to_fo_less())
-        elif isinstance(self, UniversalQuantifier):
-            # Convert universal quantifiers to negated existential quantifiers
-            # ∀x.φ(x) ≡ ¬∃x.¬φ(x)
-            negated_subformula = Negation(self.subformula.to_fo_less())
-            return Negation(ExistentialQuantifier(self.variable, negated_subformula))
-        elif isinstance(self, Predicate):
-            # Predicates don't contain relations, so they remain unchanged
-            return self
-        else:
-            raise ValueError(f"Unsupported formula type: {type(self).__name__}")
-
-    def is_fo_less(self):
-        """
-        Checks whether the formula belongs to FO[<], the first-order logic fragment
-        that only allows:
-        - Existential quantifiers (∃)
-        - Conjunctions (∧)
-        - Negations (¬)
-        - Less-than relations (<)
-
-        FO[<] is important because it corresponds to the star-free languages,
-        a proper subset of regular languages with nice algebraic properties.
-
-        Returns:
-            bool: True if the formula is in FO[<], False otherwise
-        """
-        if isinstance(self, Predicate):
-            # Only SymbolPredicates like Qa(x) are allowed in FO[<]
-            return isinstance(self, SymbolPredicate)
-
-        elif isinstance(self, Relation):
-            # Only < relations are allowed
-            return self.operator == "<"
-
-        elif isinstance(self, Negation):
-            # Negations are allowed if the subformula is in FO[<]
-            return self.subformula.is_fo_less()
-
-        elif isinstance(self, Conjunction):
-            # Conjunctions are allowed if both sides are in FO[<]
-            return self.left.is_fo_less() and self.right.is_fo_less()
-
-        elif isinstance(self, ExistentialQuantifier):
-            # Existential quantifiers are allowed if the subformula is in FO[<]
-            return self.subformula.is_fo_less()
-
-        elif isinstance(self, Disjunction):
-            # Disjunctions are not directly in FO[<], but could be expressed
-            # using De Morgan's law as ¬(¬A ∧ ¬B)
-            # However, for direct syntax checking, return False
-            return False
-
-        elif isinstance(self, UniversalQuantifier):
-            # Universal quantifiers are not directly in FO[<]
-            return False
-
-        else:
-            # Unknown formula type
-            return False
 
     def to_enf(self):
         """

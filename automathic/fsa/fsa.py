@@ -257,6 +257,20 @@ class FiniteStateAutomaton(NonDeterministicFSA):
         Returns:
             A new DFA that accepts the complement language
         """
+
+        # Handle the case of empty FSAs
+        if self.num_states == 0 or self.initial_state is None:
+            # Create a single-state DFA that accepts all strings
+            result = FiniteStateAutomaton(1, self.alphabet)
+            result.set_initial_state(0)
+            result.set_accepting_state(0)
+
+            # Add transitions from the state to itself for all symbols
+            for symbol in self.alphabet:
+                result.set_transition(0, symbol, 0)
+
+            return result
+
         # Make sure the DFA is complete
         complete_dfa = self.complete()
 
