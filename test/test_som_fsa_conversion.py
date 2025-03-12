@@ -1,8 +1,8 @@
 import unittest
 
-from automathic.fo.formulas_collection import φ_0, φ_1, φ_2, φ_3, φ_4, φ_5, φ_6, φ_7
-from automathic.fo.parser import parse_fo_formula
-from automathic.fo.translator import convert_fo_to_fsa
+from automathic.som.formulas_collection import φ_0, φ_1, φ_2, φ_3, φ_4, φ_5, φ_6, φ_7
+from automathic.som.parser import parse_fo_formula
+from automathic.som.translator import convert_fo_to_fsa
 
 
 class TestSOMtoFSA(unittest.TestCase):

@@ -1,6 +1,7 @@
 from itertools import product
 
-from automathic.fo.formula import (
+from automathic.fsa.fsa import FiniteStateAutomaton, State
+from automathic.som.formula import (
     Conjunction,
     Disjunction,
     ExistentialQuantifier,
@@ -16,7 +17,6 @@ from automathic.fo.formula import (
     UniversalQuantifier,
     UniversalSetQuantifier,
 )
-from automathic.fsa.fsa import FiniteStateAutomaton, State
 
 
 class SOMtoFSA:
@@ -639,7 +639,7 @@ def convert_som_to_fsa(formula, alphabet=None):
     Returns:
         A FiniteStateAutomaton equivalent to the formula
     """
-    from automathic.fo.parser import parse_som_formula
+    from automathic.som.parser import parse_som_formula
 
     # Parse string formulas
     if isinstance(formula, str):
@@ -694,7 +694,7 @@ class FSAToSOM:
             A SOMFormula equivalent to the automaton
         """
         # First ensure the FSA is normalized for conversion
-        # fsa = fsa.trim().minimize()
+        fsa = fsa.trim().minimize()
 
         # Check if the automaton accepts the empty string
         # (initial state is also an accepting state)

@@ -202,6 +202,20 @@ class NonDeterministicFSA:
 
         return transitions
 
+    def get_transition_targets(self, state_id, symbol):
+        """
+        Helper method to get target states for a given transition.
+
+        Args:
+            state_id: Source state ID
+            symbol: Transition symbol
+
+        Returns:
+            List of state IDs that are targets of transitions from state_id on symbol
+        """
+        transitions = self.get_transitions(state_id, symbol)
+        return [dst_id for _, dst_id in transitions]
+
     def get_transitions_between(self, src_state_id, dst_state_id):
         """
         Find all transitions from one state to another.
@@ -270,7 +284,7 @@ class NonDeterministicFSA:
 
     def to_som(self):
         """Convert the FSA to a SOM formula."""
-        from automathic.fo.translator import convert_fsa_to_som
+        from automathic.som.translator import convert_fsa_to_som
 
         return convert_fsa_to_som(self)
 

@@ -1,6 +1,6 @@
 import re
 
-from automathic.fo.formula import (
+from automathic.som.formula import (
     Conjunction,
     Disjunction,
     Equivalence,  # two new formula classes

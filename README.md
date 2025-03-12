@@ -63,7 +63,7 @@ print(fsa.accepts('011'))  # False
 #### Working with First-Order Logic Formulas
 
 ```python
-from automathic.fo.parser import parse_fo_formula
+from automathic.som.parser import parse_fo_formula
 
 # Parse a formula from a string
 formula_str = "exists x. (Qa(x) and forall y. (!Qa(y) or x = y))"
@@ -102,7 +102,7 @@ The resulting automaton accepts exactly the words that satisfy the original form
 #### Converting FO Formula to FSA
 
 ```python
-from automathic.fo.parser import parse_fo_formula
+from automathic.som.parser import parse_fo_formula
 
 # Define a formula for "strings that start with 'a'"
 formula_str = "exists x. (forall y. (!(y < x)) and Qa(x))"
@@ -122,7 +122,7 @@ print(fsa.accepts("ba"))     # False: doesn't start with 'a'
 #### Working with Formula Collections
 
 ```python
-from automathic.fo.parser import parse_fo_formula
+from automathic.som.parser import parse_fo_formula
 
 # Language of strings with exactly one 'a'
 formula_str = "exists x. (Qa(x) and forall y. (!Qa(y) or x = y))"

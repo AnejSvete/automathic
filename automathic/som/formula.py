@@ -567,7 +567,7 @@ class SOMFormula:
         Args:
             alphabet (list): List of symbols in the alphabet (default: None)
         """
-        from automathic.fo.translator import convert_som_to_fsa
+        from automathic.som.translator import convert_som_to_fsa
 
         return convert_som_to_fsa(self, alphabet)
 

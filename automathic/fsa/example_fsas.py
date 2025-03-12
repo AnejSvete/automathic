@@ -324,12 +324,12 @@ def create_starts_with_a_and_ends_with_b_automaton():
     - 1: Have seen 'a' as first symbol, currently in middle of string
     - 2: Have seen 'a' as first symbol, and ending with 'b' (accepting state)
     """
-    alphabet = ["a", "b", "c"]
+    alphabet = ["a", "b"]
     fsa = FiniteStateAutomaton(3, alphabet)
 
     # State 0 transitions (initial state)
     fsa.set_transition(0, "a", 1)  # If first symbol is 'a', move to state 1
-    for symbol in ["b", "c"]:
+    for symbol in ["b"]:
         # If first symbol is not 'a', string can't be accepted
         # We'll create transitions to make the automaton complete
         fsa.set_transition(0, symbol, 0)
