@@ -716,7 +716,7 @@ class FSAToSOM:
         formula_body = Conjunction(
             Conjunction(Conjunction(φ_1, φ_2), Conjunction(φ_3, φ_4)), φ_5
         )
-        # formula_body = φ_5
+        # formula_body = Conjunction(Conjunction(φ_1, Conjunction(φ_3, φ_4)), φ_5)
 
         # Create a formula that's true for the empty string
         # The formula ∀x.(x ≠ x) is only true for the empty string

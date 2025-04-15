@@ -19,7 +19,7 @@ from automathic.fsa.example_fsas import (
     create_starts_with_a_automaton,
     create_substring_abc_automaton,
 )
-from automathic.som.formulas_collection import φ_0, φ_1, φ_2, φ_3, φ_4, φ_5, φ_6, φ_7
+from automathic.som.formulas_collection import φ_0, φ_1a, φ_2, φ_3, φ_4, φ_5, φ_6, φ_7
 from automathic.som.parser import parse_fo_formula
 
 

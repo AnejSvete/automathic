@@ -2,7 +2,8 @@
 φ_0 = "exists x. exists y. ((forall z. (!(z < x))) and Qa(x) and (forall w. (!(y < w))) and Qb(y))"
 
 # The language containing all strings that start with 'a'
-φ_1 = "exists x. (forall y. (!(y < x)) and Qa(x))"
+φ_1a = "exists x. (forall y. (!(y < x)) and Qa(x))"
+φ_1b = "forall x. (exists y. ((y <= x)) and Qa(y))"
 
 # The language containing all strings that end with 'b'
 φ_2 = "exists x. (forall y. (!(x < y)) and Qb(x))"

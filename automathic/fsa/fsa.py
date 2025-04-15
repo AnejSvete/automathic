@@ -292,6 +292,202 @@ class FiniteStateAutomaton(NonDeterministicFSA):
 
         return result
 
+    def cascade_product(self, other, feedback_function=None):
+        """
+        Compute the cascade product of this DFA with another DFA as used in Krohn-Rhodes decomposition.
+
+        In the Krohn-Rhodes theory, a cascade product allows the second automaton's transitions
+        to depend on both the input symbol and the current state of the first automaton.
+
+        Args:
+            other (FiniteStateAutomaton): The second automaton in the cascade
+            feedback_function (callable, optional): A function that takes (q1, a) where q1 is a state
+                from self and a is an input symbol, and returns a symbol for the second automaton.
+                If None, the same input symbol is used for both automata.
+
+        Returns:
+            FiniteStateAutomaton: A new FSA representing the cascade product
+        """
+        # Create a new FSA with states representing pairs of states from both FSAs
+        result = FiniteStateAutomaton(self.num_states * other.num_states, self.alphabet)
+
+        # Use identity function if no feedback function is provided
+        if feedback_function is None:
+            feedback_function = lambda q, a: a
+
+        # Map pairs of states to new state IDs
+        state_map = {}
+        for i in range(self.num_states):
+            for j in range(other.num_states):
+                new_id = i * other.num_states + j
+                state_map[(i, j)] = new_id
+
+                # Set the combined origins for debugging/visualization
+                first_origin = self.states[i].origin
+                second_origin = other.states[j].origin
+                combined_origin = first_origin + second_origin
+                result.states[new_id] = State(new_id, origin=combined_origin)
+
+        # Set initial state
+        if self.initial_state is not None and other.initial_state is not None:
+            initial_pair = (self.initial_state.id, other.initial_state.id)
+            result.set_initial_state(state_map[initial_pair])
+
+        # Set accepting states (typically defined by the final state of the second automaton)
+        for i in range(self.num_states):
+            for j in range(other.num_states):
+                if other.states[j] in other.accepting_states:
+                    new_id = state_map[(i, j)]
+                    result.set_accepting_state(new_id)
+
+        # Set transitions - the key part of a cascade product
+        for i in range(self.num_states):
+            first_state = self.states[i]
+            for j in range(other.num_states):
+                second_state = other.states[j]
+                for symbol in self.alphabet:
+                    # First machine processes the input directly
+                    next_first = self.transition(first_state, symbol)
+
+                    if next_first is not None:
+                        # Second machine's input depends on first machine's state and the input
+                        modified_symbol = feedback_function(first_state, symbol)
+
+                        # Check if the modified symbol is in the second automaton's alphabet
+                        if modified_symbol in other.alphabet:
+                            next_second = other.transition(
+                                second_state, modified_symbol
+                            )
+
+                            if next_second is not None:
+                                src_id = state_map[(i, j)]
+                                dst_id = state_map[(next_first.id, next_second.id)]
+                                result.set_transition(src_id, symbol, dst_id)
+
+        return result
+
+    def syntactic_monoid(self):
+        """
+        Constructs the syntactic monoid of this finite state automaton.
+
+        The syntactic monoid represents transformations on the states induced by input strings:
+        - Each element of the monoid is an equivalence class of strings that induce the same
+        state transformation
+        - The operation is function composition (corresponding to string concatenation)
+        - The identity element is the empty string
+
+        This implementation:
+        1. Creates initial transformations for each alphabet symbol
+        2. Iteratively composes them until closure is reached
+        3. Returns a Monoid object from the algebra package
+
+        Returns:
+            A Monoid object representing the syntactic monoid of the FSA
+        """
+        from automathic.algebra.algebra import make_finite_algebra
+
+        # Ensure the FSA is complete and minimal
+        complete_fsa = self.minimize().complete()
+        n_states = complete_fsa.num_states
+
+        # Dictionary to store transformations (as tuples) and their representative strings
+        transformations = {}
+
+        # Start with the identity transformation (empty string)
+        identity_transform = tuple(range(n_states))
+        transformations[""] = identity_transform
+
+        # Add transformations for each individual symbol
+        for symbol in complete_fsa.alphabet:
+            transformation = []
+            for state_id in range(n_states):
+                next_state = complete_fsa.transition(state_id, symbol)
+                transformation.append(next_state.id)
+            if tuple(transformation) not in transformations.values():
+                transformations[symbol] = tuple(transformation)
+
+        # Keep track of which transformations we've composed
+        composed_pairs = set()
+
+        # Compose transformations until we reach closure
+        changed = True
+        while changed:
+            changed = False
+
+            # Get all current transformations
+            current_transforms = list(transformations.items())
+
+            # Try to compose each pair of transformations
+            for string1, transform1 in current_transforms:
+                for string2, transform2 in current_transforms:
+                    # Skip if we've already tried this composition
+                    if (string1, string2) in composed_pairs:
+                        continue
+
+                    # Mark this pair as composed
+                    composed_pairs.add((string1, string2))
+
+                    # Concatenate the strings
+                    new_string = string1 + string2
+
+                    # Compose the transformations (t1 ∘ t2)
+                    composed_transform = tuple(transform1[i] for i in transform2)
+
+                    # If this produces a new transformation, add it
+                    if composed_transform not in transformations.values():
+                        # Find the shortest string that produces this transformation
+                        for s, t in transformations.items():
+                            if t == composed_transform and len(s) < len(new_string):
+                                new_string = s
+                                break
+
+                        transformations[new_string] = composed_transform
+                        changed = True
+
+        # Get unique transformations and assign indices
+        unique_transformations = {}
+        for string, transform in transformations.items():
+            # Only keep the shortest string for each unique transformation
+            existing_transform = None
+            for t, idx in unique_transformations.items():
+                if t == transform:
+                    existing_transform = t
+                    break
+
+            if existing_transform is None or len(string) < len(existing_transform[0]):
+                if existing_transform is not None:
+                    del unique_transformations[existing_transform]
+                unique_transformations[(transform, string)] = len(
+                    unique_transformations
+                )
+
+        # Create elements list using representative strings
+        elements = [""] * len(unique_transformations)
+        for (transform, string), idx in unique_transformations.items():
+            elements[idx] = string if string else "ε"  # Use ε for empty string
+
+        # Create the multiplication table
+        n_elements = len(unique_transformations)
+        mult_table = [[0 for _ in range(n_elements)] for _ in range(n_elements)]
+
+        # Fill in the multiplication table
+        for (t1, _), i in unique_transformations.items():
+            for (t2, _), j in unique_transformations.items():
+                # Compose the transformations
+                composed = tuple(t1[state] for state in t2)
+
+                # Find the index of the resulting transformation
+                for (t, _), k in unique_transformations.items():
+                    if t == composed:
+                        mult_table[i][j] = k
+                        break
+
+        # Construct the monoid
+        name = f"SyntacticMonoid({self.name if hasattr(self, 'name') else 'FSA'})"
+        description = f"Syntactic monoid of the given finite state automaton"
+
+        return make_finite_algebra(name, description, elements, mult_table)
+
     def copy(self):
         """
         Create a deep copy of this DFA.

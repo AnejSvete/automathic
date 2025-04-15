@@ -1,6 +1,6 @@
 import unittest
 
-from automathic.som.formulas_collection import φ_0, φ_1, φ_2, φ_3, φ_4, φ_5, φ_6, φ_7
+from automathic.som.formulas_collection import φ_0, φ_1a, φ_2, φ_3, φ_4, φ_5, φ_6, φ_7
 from automathic.som.parser import parse_fo_formula
 from automathic.som.translator import convert_fo_to_fsa
 
@@ -27,7 +27,7 @@ class TestSOMtoFSA(unittest.TestCase):
     def test_strings_that_start_with_a(self):
         # φ_1: Strings that start with a
         automaton = convert_fo_to_fsa(
-            parse_fo_formula(φ_1).to_basic_form().simplify(), alphabet=["a", "b"]
+            parse_fo_formula(φ_1a).to_basic_form().simplify(), alphabet=["a", "b"]
         )
 
         # Strings that should be accepted
