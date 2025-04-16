@@ -23,7 +23,7 @@ from math import gcd
 import numpy as np  # type: ignore
 import scipy.sparse as sp  # type: ignore
 
-from automathic.algebra.algebra_viz import RingVisualizableMixin, VisualizableMixin
+from automathic.algebra.visualization import RingVisualizableMixin, VisualizableMixin
 
 
 class CayleyTable:

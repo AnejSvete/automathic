@@ -1,6 +1,33 @@
 from automathic.fsa.fsa import FiniteStateAutomaton
 
 
+def create_A5_automaton():
+    alphabet = ["0", "1"]
+    fsa = FiniteStateAutomaton(5, alphabet)
+
+    # Set transitions
+    fsa.set_transition(0, "0", 1)
+    fsa.set_transition(0, "1", 1)
+
+    fsa.set_transition(1, "0", 2)
+    fsa.set_transition(1, "1", 2)
+
+    fsa.set_transition(2, "0", 3)
+    fsa.set_transition(2, "1", 0)
+
+    fsa.set_transition(3, "0", 4)
+    fsa.set_transition(3, "1", 3)
+
+    fsa.set_transition(4, "0", 0)
+    fsa.set_transition(4, "1", 4)
+
+    # Set initial and accepting states
+    fsa.set_initial_state(0)
+    fsa.set_accepting_state(0)
+
+    return fsa
+
+
 def create_substring_abc_automaton():
     """
     Creates an FSA that recognizes strings containing 'abc' as a substring.
